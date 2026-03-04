@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Test coverage
+coverage/
+
+# Environment (contains secrets)
+.env
+.env.local
+.env.*.local
+
+# Mastra
+.mastra/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# TypeScript
+*.tsbuildinfo
+
+# Personal Claude Code config (not shared)
+CLAUDE.personal.md
+.claude/settings.local.json
+
+# Logs
+*.log
+npm-debug.log*

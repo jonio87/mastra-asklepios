@@ -1,0 +1,65 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Edit|MultiEdit|Write)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/pre-edit-guard.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/pre-bash-firewall.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^(Edit|MultiEdit|Write)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/post-edit-quality.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/stop-quality-gate.sh"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/notification.sh"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/compaction-reminder.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "name": "mastra-asklepios",
+  "version": "0.1.0",
+  "description": "Mastra AI agent project — Asklepios",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "mastra-asklepios": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "mastra dev",
+    "start": "node dist/cli.js",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest --passWithNoTests --forceExit",
+    "test:single": "node --experimental-vm-modules node_modules/.bin/jest --passWithNoTests",
+    "test:watch": "node --experimental-vm-modules node_modules/.bin/jest --watch",
+    "test:coverage": "node --experimental-vm-modules node_modules/.bin/jest --coverage",
+    "lint": "biome check src/",
+    "lint:fix": "biome check --write src/",
+    "format": "biome format --write src/",
+    "typecheck": "tsc --noEmit",
+    "typecheck:watch": "tsc --noEmit --watch",
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "check:fix": "npm run lint:fix && npm run typecheck && npm run test",
+    "pre-commit": "npm run check"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "@mastra/core": "^0.10.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.0.0",
+    "@types/node": "^22.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "license": "MIT"
+}
