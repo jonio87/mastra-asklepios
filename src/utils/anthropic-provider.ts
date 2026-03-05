@@ -2,6 +2,13 @@ import { execSync } from 'node:child_process';
 import type { AnthropicProvider } from '@ai-sdk/anthropic';
 import { createAnthropic } from '@ai-sdk/anthropic';
 
+/** Strip leading ASCII control characters (0x00–0x1F) from hex-decoded keychain blobs. */
+function stripLeadingControlChars(s: string): string {
+  let i = 0;
+  while (i < s.length && s.charCodeAt(i) < 0x20) i++;
+  return s.slice(i);
+}
+
 import { logger } from './logger.js';
 
 interface ClaudeCodeCredentials {
@@ -28,30 +35,39 @@ function readClaudeCodeToken(): string | undefined {
   }
 
   try {
-    const hex = execSync('security find-generic-password -s "Claude Code-credentials" -w', {
+    const raw = execSync('security find-generic-password -s "Claude Code-credentials" -w', {
       encoding: 'utf-8',
       timeout: 5_000,
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
 
-    const decoded = Buffer.from(hex, 'hex').toString('utf-8');
-    const jsonStart = decoded.indexOf('{');
-    if (jsonStart === -1) {
-      logger.debug('No JSON found in Claude Code keychain entry');
-      return undefined;
-    }
+    // Keychain entry may be raw JSON or hex-encoded — try both
+    const text = raw.startsWith('{')
+      ? raw
+      : stripLeadingControlChars(Buffer.from(raw, 'hex').toString('utf-8'));
 
-    const creds: ClaudeCodeCredentials = JSON.parse(decoded.slice(jsonStart));
-    const token = creds.claudeAiOauth?.accessToken;
+    // Try full JSON parse first; fall back to regex for truncated blobs
+    let token: string | undefined;
+    let expiresAt: number | undefined;
+    try {
+      const jsonStr = text.startsWith('{') ? text : `{${text}}`;
+      const creds: ClaudeCodeCredentials = JSON.parse(jsonStr);
+      token = creds.claudeAiOauth?.accessToken;
+      expiresAt = creds.claudeAiOauth?.expiresAt;
+    } catch {
+      // Hex blob may be truncated — extract token via regex
+      const tokenMatch = text.match(/"accessToken":"([^"]+)"/);
+      const expiryMatch = text.match(/"expiresAt":(\d+)/);
+      token = tokenMatch?.[1];
+      expiresAt = expiryMatch?.[1] ? Number(expiryMatch[1]) : undefined;
+    }
 
     if (!token) {
       logger.debug('No OAuth access token in Claude Code credentials');
       return undefined;
     }
 
-    const now = Date.now();
-    const expiresAt = creds.claudeAiOauth?.expiresAt;
-    if (expiresAt && expiresAt < now) {
+    if (expiresAt && expiresAt < Date.now()) {
       logger.warn('Claude Code OAuth token has expired — run `claude` to refresh');
       return undefined;
     }
@@ -67,26 +83,6 @@ function readClaudeCodeToken(): string | undefined {
 export type AuthMethod = 'env' | 'claude-code';
 
 /**
- * Resolves the Anthropic API key by auth method.
- *
- * - `'env'` (default): uses the `ANTHROPIC_API_KEY` environment variable.
- *   When running inside a Claude Code session, this env var is already set.
- * - `'claude-code'`: reads the OAuth access token directly from the macOS Keychain
- *   (useful when launching outside a Claude Code session but still using your
- *   Claude Code subscription).
- *
- * Falls back to `'env'` if `'claude-code'` fails to read credentials.
- */
-function resolveApiKey(method: AuthMethod): string | undefined {
-  if (method === 'claude-code') {
-    const token = readClaudeCodeToken();
-    if (token) return token;
-    logger.warn('Claude Code auth failed, falling back to ANTHROPIC_API_KEY env var');
-  }
-  return process.env['ANTHROPIC_API_KEY'];
-}
-
-/**
  * Creates a configured Anthropic provider.
  *
  * @param authMethod - How to authenticate:
@@ -99,8 +95,16 @@ export function getAnthropicProvider(authMethod?: AuthMethod): AnthropicProvider
   const method: AuthMethod =
     authMethod ?? (process.env['ASKLEPIOS_AUTH'] as AuthMethod | undefined) ?? 'env';
 
-  const apiKey = resolveApiKey(method);
+  if (method === 'claude-code') {
+    const token = readClaudeCodeToken();
+    if (token) {
+      // Claude Code OAuth tokens work as x-api-key (not Bearer)
+      return createAnthropic({ apiKey: token });
+    }
+    logger.warn('Claude Code auth failed, falling back to ANTHROPIC_API_KEY env var');
+  }
 
+  const apiKey = process.env['ANTHROPIC_API_KEY'];
   return createAnthropic({
     ...(apiKey ? { apiKey } : {}),
   });

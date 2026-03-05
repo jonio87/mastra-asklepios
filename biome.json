@@ -94,12 +94,34 @@
     }
   },
   "files": {
-    "includes": ["src/**/*.ts", "tests/**/*.ts"],
+    "includes": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts"],
     "experimentalScannerIgnores": ["node_modules", "dist", "coverage", ".mastra"]
   },
   "overrides": [
     {
-      "includes": ["src/**/*.test.ts", "tests/**/*.ts"],
+      "includes": ["src/**/*.tsx"],
+      "linter": {
+        "rules": {
+          "style": {
+            "useNamingConvention": {
+              "level": "warn",
+              "options": {
+                "conventions": [
+                  { "selector": { "kind": "function" }, "formats": ["camelCase", "PascalCase"] },
+                  {
+                    "selector": { "kind": "variable" },
+                    "formats": ["camelCase", "CONSTANT_CASE", "PascalCase"]
+                  },
+                  { "selector": { "kind": "typeLike" }, "formats": ["PascalCase"] }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/**/*.test.ts", "src/**/*.test.tsx", "tests/**/*.ts"],
       "javascript": {
         "globals": ["jest"]
       },
