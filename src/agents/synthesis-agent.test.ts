@@ -1,0 +1,34 @@
+import { synthesisAgent } from './synthesis-agent.js';
+
+describe('synthesisAgent', () => {
+  it('has correct agent id', () => {
+    expect(synthesisAgent.id).toBe('synthesis-agent');
+  });
+
+  it('has correct agent name', () => {
+    expect(synthesisAgent.name).toBe('Synthesis Agent');
+  });
+
+  it('has instructions with synthesis framework', async () => {
+    const instructions = await synthesisAgent.getInstructions();
+    expect(instructions).toContain('Evidence Inventory');
+    expect(instructions).toContain('Hypothesis Generation');
+    expect(instructions).toContain('Hypothesis Ranking');
+  });
+
+  it('has instructions with self-reflection loop', async () => {
+    const instructions = await synthesisAgent.getInstructions();
+    expect(instructions).toContain('Self-Reflection Loop');
+  });
+
+  it('has instructions requiring differential diagnosis', async () => {
+    const instructions = await synthesisAgent.getInstructions();
+    expect(instructions).toContain('NEVER present a single diagnosis as definitive');
+    expect(instructions).toContain('differential');
+  });
+
+  it('has no tools configured (pure reasoning agent)', () => {
+    const tools = synthesisAgent.listTools();
+    expect(Object.keys(tools)).toHaveLength(0);
+  });
+});

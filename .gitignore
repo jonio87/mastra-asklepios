@@ -15,6 +15,14 @@ coverage/
 # Mastra
 .mastra/
 
+# SQLite database (local persistence)
+*.db
+*.db-shm
+*.db-wal
+
+# Research scratchpad (local only)
+research/
+
 # IDE
 .idea/
 .vscode/

@@ -28,8 +28,11 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
-    "@mastra/core": "^0.10.0",
-    "zod": "^3.24.0"
+    "@ai-sdk/anthropic": "^3.0.56",
+    "@mastra/core": "^1.9.0",
+    "@mastra/libsql": "^1.6.3",
+    "@mastra/memory": "^1.6.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",

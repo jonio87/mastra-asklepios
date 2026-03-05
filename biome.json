@@ -71,7 +71,7 @@
         "noConfusingVoidType": "error"
       },
       "performance": {
-        "noBarrelFile": "warn",
+        "noBarrelFile": "off",
         "noReExportAll": "warn"
       },
       "nursery": {
