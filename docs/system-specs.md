@@ -2,8 +2,8 @@
 
 > Rare Disease Research Agent with Diagnostic Odyssey Compression
 
-**Version:** 0.1.0 (MVP)
-**Status:** Core implementation complete — all features verified via comprehensive manual testing
+**Version:** 0.2.0
+**Status:** Core implementation complete + Phase 8 enhancements (ClinVar, rate limiting, dynamic maxSteps, MCP Tasks)
 
 ---
 
@@ -37,17 +37,18 @@ The killer feature is **Cross-Patient Observational Memory** — powered by Mast
 ```
 src/
 ├── agents/                    # 5 specialized agents
-│   ├── asklepios.ts           # Central orchestrator (7 tools, all routing)
-│   ├── research-agent.ts      # Literature search specialist (3 tools)
+│   ├── asklepios.ts           # Central orchestrator (8 tools, all routing)
+│   ├── research-agent.ts      # Literature search specialist (4 tools)
 │   ├── phenotype-agent.ts     # HPO symptom mapping specialist (2 tools)
 │   ├── synthesis-agent.ts     # Evidence synthesis & hypothesis ranking (no tools, pure reasoning)
 │   └── brain-agent.ts         # Cross-patient intelligence (no tools, pure reasoning)
-├── tools/                     # 7 external API integrations (5 core + 2 brain)
-│   ├── pubmed-search.ts       # NCBI PubMed eUtils API
+├── tools/                     # 8 external API integrations (6 core + 2 brain)
+│   ├── pubmed-search.ts       # NCBI PubMed eUtils API (rate-limited)
+│   ├── clinvar-lookup.ts      # NCBI ClinVar variant pathogenicity database
 │   ├── orphanet-lookup.ts     # Orphanet rare disease database
 │   ├── hpo-mapper.ts          # Human Phenotype Ontology API
 │   ├── document-parser.ts     # Medical document extraction (local)
-│   └── deep-research.ts       # Multi-source parallel research synthesis
+│   └── deep-research.ts       # Multi-source research synthesis (PubMed + OMIM)
 ├── workflows/                 # 2 multi-step orchestration pipelines
 │   ├── patient-intake.ts      # Document → parse → phenotype → review
 │   └── diagnostic-research.ts # Parallel research → synthesis → hypotheses
@@ -70,7 +71,9 @@ src/
 │   ├── logger.ts              # Structured logging (debug/info/warn/error)
 │   ├── stderr-logger.ts       # StderrLogger — redirects framework logs to stderr
 │   ├── usage-tracker.ts       # Token usage tracking per session
-│   └── observability.ts       # Tracing callbacks for agent execution
+│   ├── observability.ts       # Tracing callbacks for agent execution
+│   ├── ncbi-rate-limiter.ts   # Shared NCBI eUtils rate limiter with exponential backoff
+│   └── max-steps.ts           # Dynamic maxSteps resolution based on query complexity
 ├── memory.ts                  # Shared Memory + Storage instances
 ├── mastra.ts                  # Mastra instance (agent/workflow registry)
 ├── cli.ts                     # Interactive REPL entry point
@@ -84,8 +87,8 @@ src/
 
 | Agent | Role | Tools | Model |
 |-------|------|-------|-------|
-| **Asklepios** | Central orchestrator; routes to sub-agents, coordinates research; supports network mode for multi-agent delegation | pubmedSearch, orphanetLookup, hpoMapper, documentParser, deepResearch, brainRecall, brainFeed | Dynamic (Haiku/Sonnet/Opus via model router) |
-| **Research Agent** | Deep literature search across medical databases | pubmedSearch, orphanetLookup, deepResearch | claude-sonnet-4 |
+| **Asklepios** | Central orchestrator; routes to sub-agents, coordinates research; supports network mode for multi-agent delegation | pubmedSearch, orphanetLookup, hpoMapper, documentParser, deepResearch, brainRecall, brainFeed, clinvarLookup | Dynamic (Haiku/Sonnet/Opus via model router) |
+| **Research Agent** | Deep literature search across medical databases | pubmedSearch, orphanetLookup, deepResearch, clinvarLookup | claude-sonnet-4 |
 | **Phenotype Agent** | Symptom extraction & HPO term standardization | hpoMapper, documentParser | claude-sonnet-4 |
 | **Synthesis Agent** | Evidence synthesis, hypothesis ranking, self-reflection | _(none — pure reasoning)_ | claude-sonnet-4 |
 | **Brain Agent** | Cross-patient pattern recognition, differential reasoning | _(none — pure reasoning)_ | claude-sonnet-4 |
@@ -114,7 +117,7 @@ Asklepios supports **network mode** via Mastra's `agent.network()` API. In netwo
 
 Toggle network mode in the CLI with `/network`. The `[net]` indicator appears in the prompt when active.
 
-**Configuration**: `maxSteps: 10`, routing instructions guide agent selection, `onIterationComplete` callback logs routing decisions to stderr for observability.
+**Configuration**: `maxSteps: dynamic` (resolved per query via `resolveMaxSteps()` — see Dynamic maxSteps below), routing instructions guide agent selection, `onIterationComplete` callback logs routing decisions to stderr for observability.
 
 ---
 
@@ -146,16 +149,40 @@ Schema-based structured state for each patient using `patientProfileSchema` (Zod
 - Thread-per-conversation, resource-per-patient model
 
 ---
-
 ## Tools
 
 | Tool | Data Source | Purpose |
-|------|-----------|---------|
+|------|-----------|---------| 
 | `pubmedSearch` | NCBI eUtils API | Search medical literature (articles, case reports, trials) |
+| `clinvarLookup` | NCBI ClinVar API | Look up genetic variant pathogenicity, clinical significance, review status |
 | `orphanetLookup` | Orphanet API | Rare disease database lookup (genes, inheritance, prevalence) |
 | `hpoMapper` | HPO API | Map free-text symptoms → standardized HPO terms with confidence |
 | `documentParser` | Local processing | Parse medical documents → structured data (sections, labs, demographics) |
-| `deepResearch` | Multi-source | Parallel research synthesis with evidence levels and gap analysis |
+| `deepResearch` | PubMed + OMIM | Multi-source research synthesis with evidence levels and gap analysis |
+
+### ClinVar Integration (Phase 8)
+
+The `clinvarLookupTool` searches the NCBI ClinVar database for genetic variant pathogenicity data:
+- **Input**: `query` (free text), `gene` (gene symbol, e.g., "COL3A1"), `variant` (HGVS notation, e.g., "c.1854+1G>A")
+- **Output**: Variants with `accession`, `clinicalSignificance`, `reviewStatus`, `gene`, `condition`, `lastEvaluated`, `hgvsNotation`, `url`
+- Uses same NCBI eUtils API pattern as PubMed (`db=clinvar`), shares rate limiter
+- Smart query builder combines gene + variant into field-tagged search terms
+
+### OMIM Integration (Phase 8)
+
+The `deepResearch` tool now includes real OMIM API integration (previously stub):
+- Requires `OMIM_API_KEY` env var (free for academic use via registration at omim.org)
+- Without key: graceful fallback to stub results (no behavior change)
+- With key: fetches gene-disease relationships, MIM numbers, phenotype descriptions
+- Maps OMIM entry prefixes to evidence levels (`*` gene → 'review', `#` phenotype → 'cohort')
+
+### NCBI Rate Limiting (Phase 8)
+
+All NCBI eUtils calls (PubMed + ClinVar) go through a shared rate limiter (`src/utils/ncbi-rate-limiter.ts`):
+- **Exponential backoff**: 1s → 2s → 4s → 8s → 16s on 429/500 responses (max 5 retries)
+- **API key support**: Set `NCBI_API_KEY` env var to increase rate limit from 3 to 10 req/sec
+- **Shared singleton**: All tools share one limiter to prevent cross-tool rate limit collisions
+- **No retry on 400**: Client errors fail immediately without retry
 
 ---
 
@@ -242,24 +269,26 @@ Full AI-testable control plane via Model Context Protocol (`src/mcp/`). Any MCP 
 ```
 src/mcp/
 ├── server.ts          # Thin orchestrator — creates McpServer, calls register functions
-├── tools-core.ts      # 5 original tools (ask, search, lookup, map, recall)
+├── tools-core.ts      # 6 core tools (ask, search, lookup_orphanet, lookup_clinvar, map, recall)
 ├── tools-agents.ts    # 4 agent invocation tools (invoke each agent independently)
 ├── tools-workflows.ts # 3 workflow execution + resume tools
 ├── tools-state.ts     # 5 state inspection + raw tool access
+├── tools-tasks.ts     # 2 task-based tools for long-running operations (experimental)
 ├── resources.ts       # 7 resources (3 templates + 4 static system resources)
 ├── prompts.ts         # 4 prompts (diagnostic workflows + test scenarios)
 ├── stdio.ts           # StdioServerTransport entry point
-└── server.test.ts     # 37 registration tests (mocks @mastra/core)
+└── server.test.ts     # Registration tests (mocks @mastra/core)
 ```
 
-### Tools (17)
+### Tools (20)
 
-#### Core Tools (5)
+#### Core Tools (6)
 | Tool | Annotations | Description |
 |------|-------------|-------------|
 | `ask_asklepios` | `readOnlyHint: false` | Chat with the Asklepios orchestrator agent |
 | `search_pubmed` | `readOnlyHint: true` | Search PubMed for medical literature |
 | `lookup_orphanet` | `readOnlyHint: true` | Look up rare disease in Orphanet |
+| `lookup_clinvar` | `readOnlyHint: true` | Look up genetic variants in ClinVar (pathogenicity, review status) |
 | `map_symptoms` | `readOnlyHint: true` | Map free-text symptoms to HPO terms |
 | `recall_brain` | `readOnlyHint: true` | Query cross-patient intelligence |
 
@@ -286,6 +315,17 @@ src/mcp/
 | `get_thread_messages` | `threadId`, `limit?` | Retrieve messages from a specific thread |
 | `parse_document` | `text`, `documentType?` | Raw tool: parse a medical document (no agent involved) |
 | `deep_research` | `query`, `context?`, `focusAreas?`, `maxSources?` | Raw tool: run deep research query (no agent involved) |
+
+#### Task-Based Tools (2) — Experimental MCP Tasks API
+
+Long-running operations that return a task ID immediately, allowing clients to poll for completion. Uses `server.experimental.tasks.registerToolTask()` from MCP SDK v1.27.1.
+
+| Tool | Input | TTL | Description |
+|------|-------|-----|-------------|
+| `run_deep_research` | `query`, `context?`, `focusAreas?`, `maxSources?` | 5 min | Async deep research — returns task ID, poll for ResearchReport |
+| `run_diagnostic_workflow` | `workflowId`, `patientId`, `documentText?`, `symptoms?`, ... | 10 min | Async workflow execution — returns task ID, poll for workflow result |
+
+**Why tasks?** The `ask_asklepios` MCP tool timed out during testing because deep-research makes 10+ API calls. Task-based tools return immediately with a task ID, letting clients poll at their own pace.
 
 ### Resources (7)
 
@@ -368,26 +408,42 @@ Measured baselines (Claude Sonnet 4, macOS, local SQLite):
 | Brain feed/recall (4 steps) | ~38s | brainFeed → brainRecall → updateWorkingMemory → response |
 | Token usage per turn | 10K-110K total | Simple recall ~11K, complex research ~110K |
 
+### Dynamic maxSteps (Phase 8)
+
+Intelligent step limit scaling via `resolveMaxSteps(message)` (`src/utils/max-steps.ts`):
+
+| Query Type | maxSteps | Examples |
+|-----------|----------|---------|
+| Simple chat | 5 | Greetings, status checks, short questions (<50 chars) |
+| Standard query | 10 | Symptom descriptions, single research questions |
+| Complex research | 15 | Variant analysis, differential diagnosis ("research", "investigate") |
+| Deep diagnostic | 20 | Comprehensive workups ("comprehensive", "deep dive", "full workup") |
+
+- Override via `ASKLEPIOS_MAX_STEPS` env var (explicit tuning)
+- Bounded: `Math.min(Math.max(result, 3), 25)`
+- Applied in both direct mode and network mode
+
 ### Latency Notes
 - First-token latency dominated by LLM response time, not framework overhead
 - Tool execution adds ~600ms per external API call (network-bound)
 - Multi-turn latency scales with tool count and working memory update complexity
-- `maxSteps: 10` allows complex diagnostic workflows to complete (default 5 was too restrictive)
+- Dynamic `maxSteps` adapts to query complexity (5-20 steps) — simple chat uses 5, complex research uses 15-20
 - Working memory recall across threads is fast (~11K tokens, single step) since PatientProfile persists at resource scope
 - Haiku mode (`quick`/`voice`) targets sub-200ms TTFT for simple interactions
+- NCBI rate limiter adds ~1s delay per retry on 429 responses (exponential backoff)
 
 ---
 
 ## Testing
 
 ### Unit Tests
-- **269 tests** across 26 passing test suites
+- **315 tests** across 29 passing test suites
 - Colocated test files (`*.test.ts` next to source)
-- Coverage: tools (schema validation + execution), agents (config verification + network configuration), workflows (schema + structure + HITL suspend/resume schemas), processors (input/output behavior), CLI (command parsing + session management + network toggle), MCP server (37 registration tests for all 17 tools, 7 resources, 4 prompts), utils (model router, logger, usage tracker, observability)
+- Coverage: tools (schema validation + execution), agents (config verification + network configuration + dynamic maxSteps), workflows (schema + structure + HITL suspend/resume schemas), processors (input/output behavior), CLI (command parsing + session management + network toggle), MCP server (registration tests for all 20 tools, 7 resources, 4 prompts + task-based tools), utils (model router, logger, usage tracker, observability, NCBI rate limiter, maxSteps resolver), ClinVar lookup (query building, schema validation)
 
 ### MCP Integration Tests
-- `scripts/test-mcp-integration.ts` — exercises all 17 MCP tools, 12 resources, 4 prompts via MCP SDK client
-- Results: 56/57 passed; sole failure is `ask_asklepios` timeout under PubMed rate limiting (external API constraint)
+- `scripts/test-mcp-integration.ts` — exercises MCP tools, resources, prompts via MCP SDK client
+- Results: 56/57 passed; sole failure is `ask_asklepios` timeout under PubMed rate limiting (mitigated by task-based tools in Phase 8)
 - `scripts/test-workflows-live.ts` — live workflow execution, Orphanet/PubMed/HPO/document parser verification; 19/19 passed
 
 ### Comprehensive Manual Verification (6-turn patient simulation)

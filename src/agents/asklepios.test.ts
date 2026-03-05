@@ -44,7 +44,7 @@ describe('asklepiosAgent', () => {
 
     it('has default network options configured', () => {
       expect(defaultNetworkOptions).toBeDefined();
-      expect(defaultNetworkOptions.maxSteps).toBe(10);
+      expect(defaultNetworkOptions.maxSteps).toBe(15);
     });
 
     it('has routing instructions for agent selection', () => {

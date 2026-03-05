@@ -139,6 +139,62 @@ export function registerCoreTools(server: McpServer): void {
   );
 
   server.registerTool(
+    'lookup_clinvar',
+    {
+      description:
+        'Look up genetic variant pathogenicity in ClinVar. Search by gene symbol, HGVS variant notation, or free text to get clinical significance, review status, and associated conditions.',
+      inputSchema: {
+        query: z.string().optional().describe('Free text search query (e.g., "Ehlers-Danlos")'),
+        gene: z
+          .string()
+          .optional()
+          .describe('Gene symbol for field-specific search (e.g., "COL3A1")'),
+        variant: z
+          .string()
+          .optional()
+          .describe('HGVS notation for variant-specific search (e.g., "c.1854+1G>A")'),
+        maxResults: z
+          .number()
+          .min(1)
+          .max(50)
+          .optional()
+          .describe('Maximum number of results to return (default: 10)'),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ query, gene, variant, maxResults }) => {
+      const agent = mastra.getAgent('asklepios');
+      const tools = await agent.listTools();
+      const clinvar = tools['clinvarLookup'];
+      if (!clinvar?.execute) {
+        return {
+          content: [{ type: 'text' as const, text: 'ClinVar lookup tool not available' }],
+          isError: true,
+        };
+      }
+
+      const result = await clinvar.execute(
+        {
+          ...(query !== undefined ? { query } : {}),
+          ...(gene !== undefined ? { gene } : {}),
+          ...(variant !== undefined ? { variant } : {}),
+          maxResults: maxResults ?? 10,
+        },
+        { mastra },
+      );
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
     'map_symptoms',
     {
       description:

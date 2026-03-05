@@ -1,5 +1,6 @@
 import { Agent } from '@mastra/core/agent';
 import { memory } from '../memory.js';
+import { clinvarLookupTool } from '../tools/clinvar-lookup.js';
 import { deepResearchTool } from '../tools/deep-research.js';
 import { orphanetLookupTool } from '../tools/orphanet-lookup.js';
 import { pubmedSearchTool } from '../tools/pubmed-search.js';
@@ -41,6 +42,7 @@ Your primary role is to conduct thorough literature searches and gather evidence
   tools: {
     pubmedSearch: pubmedSearchTool,
     orphanetLookup: orphanetLookupTool,
+    clinvarLookup: clinvarLookupTool,
     deepResearch: deepResearchTool,
   },
 });

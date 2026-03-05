@@ -113,3 +113,8 @@ Don't read these upfront — load them when relevant to your current task:
 - [2026-03-05] [@mastra/observability] Package requires @mastra/core >=0.18.1-0 <0.25.0-0 but project uses @mastra/core@1.9.0. Use lightweight custom tracing instead.
 - [2026-03-05] [Mastra Workflow API] workflow.execute() is internal; use workflow.createRun() → run.start({ inputData }) for external invocation (MCP tools).
 - [2026-03-05] [Document parser] Regex-based extraction has limits: "28F" compact format needed special handling; medication extraction captures compound strings. NLP would improve accuracy.
+- [2026-03-05] [NCBI rate limiting] PubMed + ClinVar share same eUtils rate limit (3 req/sec without key, 10 with NCBI_API_KEY). deep-research generates 10+ calls — shared rate limiter with exponential backoff prevents 429 errors.
+- [2026-03-05] [ClinVar API] Uses same NCBI eUtils pattern as PubMed (esearch → esummary with db=clinvar). Clinical significance field can be nested as `clinical_significance.description` or flat string — handle both.
+- [2026-03-05] [Dynamic maxSteps] Hardcoded maxSteps insufficient: simple chat needs 5, research needs 15, deep diagnosis needs 20. Keyword-based heuristic with env var override (ASKLEPIOS_MAX_STEPS) balances efficiency and capability.
+- [2026-03-05] [MCP Tasks API] MCP SDK v1.27.1 experimental tasks: registerToolTask() does NOT accept inputSchema in config — it's inferred from generic type parameter. Handler methods: createTask/getTask/getTaskResult with RequestTaskStore.
+- [2026-03-05] [OMIM API] Requires free API key (omim.org registration). Entry prefix indicates type: `*` = gene, `#` = phenotype, `%` = cytogenetic region. Map to evidence levels for research findings.

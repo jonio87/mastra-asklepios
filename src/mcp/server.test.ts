@@ -6,6 +6,7 @@ import { registerResources } from './resources.js';
 import { registerAgentTools } from './tools-agents.js';
 import { registerCoreTools } from './tools-core.js';
 import { registerStateTools } from './tools-state.js';
+import { registerTaskTools } from './tools-tasks.js';
 import { registerWorkflowTools } from './tools-workflows.js';
 
 /**
@@ -68,7 +69,7 @@ describe('MCP Server', () => {
       const server = createAsklepiosMcpServer();
       const { tools, resources, resourceTemplates, prompts } = getServerInternals(server);
 
-      expect(Object.keys(tools).length).toBe(17);
+      expect(Object.keys(tools).length).toBe(20);
       expect(Object.keys(resources).length + Object.keys(resourceTemplates).length).toBe(7);
       expect(Object.keys(prompts).length).toBe(4);
     });
@@ -80,14 +81,15 @@ describe('MCP Server', () => {
     const { tools } = getServerInternals(server);
     const toolNames = Object.keys(tools);
 
-    it('registers exactly 5 core tools', () => {
-      expect(toolNames.length).toBe(5);
+    it('registers exactly 6 core tools', () => {
+      expect(toolNames.length).toBe(6);
     });
 
     it.each([
       'ask_asklepios',
       'search_pubmed',
       'lookup_orphanet',
+      'lookup_clinvar',
       'map_symptoms',
       'recall_brain',
     ])('registers %s', (name) => {
@@ -151,6 +153,21 @@ describe('MCP Server', () => {
       'parse_document',
       'deep_research',
     ])('registers %s', (name) => {
+      expect(toolNames).toContain(name);
+    });
+  });
+
+  describe('registerTaskTools', () => {
+    const server = createTestServer();
+    registerTaskTools(server);
+    const { tools } = getServerInternals(server);
+    const toolNames = Object.keys(tools);
+
+    it('registers exactly 2 task tools', () => {
+      expect(toolNames.length).toBe(2);
+    });
+
+    it.each(['run_deep_research', 'run_diagnostic_workflow'])('registers %s', (name) => {
       expect(toolNames).toContain(name);
     });
   });

@@ -2,6 +2,7 @@ import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 
 import { logger } from '../utils/logger.js';
+import { NCBI_BASE_URL, ncbiFetch } from '../utils/ncbi-rate-limiter.js';
 
 const ResearchFindingSchema = z.object({
   source: z.string().describe('Source of the finding (e.g., PubMed, OMIM, case report)'),
@@ -123,18 +124,17 @@ async function searchPubMedForFindings(
   query: string,
   maxResults: number,
 ): Promise<ResearchFinding[]> {
-  const PUBMED_BASE = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
-  const searchUrl = `${PUBMED_BASE}/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${maxResults}&retmode=json`;
+  const searchUrl = `${NCBI_BASE_URL}/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${maxResults}&retmode=json`;
 
-  const response = await fetch(searchUrl);
+  const response = await ncbiFetch(searchUrl);
   if (!response.ok) return [];
 
   const data = (await response.json()) as { esearchresult?: { idlist?: string[] } };
   const ids = data.esearchresult?.idlist ?? [];
   if (ids.length === 0) return [];
 
-  const summaryUrl = `${PUBMED_BASE}/esummary.fcgi?db=pubmed&id=${ids.join(',')}&retmode=json`;
-  const summaryResponse = await fetch(summaryUrl);
+  const summaryUrl = `${NCBI_BASE_URL}/esummary.fcgi?db=pubmed&id=${ids.join(',')}&retmode=json`;
+  const summaryResponse = await ncbiFetch(summaryUrl);
   if (!summaryResponse.ok) return [];
 
   const summaryData = (await summaryResponse.json()) as {
@@ -157,19 +157,110 @@ async function searchPubMedForFindings(
   }, []);
 }
 
+const OMIM_PREFIX_TO_EVIDENCE: Record<string, ResearchFinding['evidenceLevel']> = {
+  '*': 'review', // gene with known sequence
+  '#': 'cohort', // phenotype, molecular basis known
+  '%': 'unknown', // confirmed mendelian locus
+  '+': 'review', // gene with known sequence and phenotype
+  '^': 'unknown', // entry has been removed or moved
+};
+
+interface OmimEntry {
+  mimNumber?: number;
+  prefix?: string;
+  status?: string;
+  titles?: { preferredTitle?: string };
+  geneMap?: { geneSymbols?: string; geneName?: string; chromosomeLocation?: string };
+}
+
+function mapOmimEntryToFinding(entry: OmimEntry | undefined): ResearchFinding | undefined {
+  if (!entry) return undefined;
+
+  const prefix = entry.prefix ?? '';
+  const mimNumber = entry.mimNumber ?? 0;
+  const title = entry.titles?.preferredTitle ?? 'Unknown entry';
+  const geneSymbols = entry.geneMap?.geneSymbols ?? '';
+  const geneName = entry.geneMap?.geneName ?? '';
+  const location = entry.geneMap?.chromosomeLocation ?? '';
+
+  const summaryParts = [`MIM #${mimNumber}`];
+  if (geneSymbols) summaryParts.push(`Gene: ${geneSymbols}`);
+  if (geneName) summaryParts.push(`(${geneName})`);
+  if (location) summaryParts.push(`at ${location}`);
+
+  return {
+    source: 'OMIM',
+    title: `${prefix}${mimNumber} ${title}`,
+    summary: summaryParts.join(' — '),
+    relevance: prefix === '#' || prefix === '*' ? 0.8 : 0.6,
+    url: `https://omim.org/entry/${mimNumber}`,
+    evidenceLevel: OMIM_PREFIX_TO_EVIDENCE[prefix] ?? 'unknown',
+  };
+}
+
 async function searchOmimForFindings(query: string): Promise<ResearchFinding[]> {
-  logger.info('OMIM search (stub)', { query });
-  return [
-    {
-      source: 'OMIM',
-      title: `OMIM search: ${query}`,
-      summary:
-        'OMIM integration requires API key. Configure OMIM_API_KEY environment variable for full access.',
-      relevance: 0.5,
-      url: `https://omim.org/search?search=${encodeURIComponent(query)}`,
-      evidenceLevel: 'unknown',
-    },
-  ];
+  const apiKey = process.env['OMIM_API_KEY'];
+
+  if (!apiKey) {
+    logger.info('OMIM search skipped — no API key', { query });
+    return [
+      {
+        source: 'OMIM',
+        title: `OMIM search: ${query}`,
+        summary:
+          'OMIM integration requires API key. Configure OMIM_API_KEY environment variable for full access.',
+        relevance: 0.5,
+        url: `https://omim.org/search?search=${encodeURIComponent(query)}`,
+        evidenceLevel: 'unknown',
+      },
+    ];
+  }
+
+  logger.info('Searching OMIM', { query });
+
+  const url = `https://api.omim.org/api/entry/search?search=${encodeURIComponent(query)}&apiKey=${encodeURIComponent(apiKey)}&format=json&limit=10`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      logger.error('OMIM search failed', { status: response.status });
+      return [];
+    }
+
+    const data = (await response.json()) as {
+      omim?: {
+        searchResponse?: {
+          endIndex?: number;
+          entryList?: Array<{
+            entry?: {
+              mimNumber?: number;
+              prefix?: string;
+              status?: string;
+              titles?: {
+                preferredTitle?: string;
+              };
+              geneMap?: {
+                geneSymbols?: string;
+                geneName?: string;
+                chromosomeLocation?: string;
+              };
+            };
+          }>;
+        };
+      };
+    };
+
+    const entries = data.omim?.searchResponse?.entryList ?? [];
+
+    return entries.reduce<ResearchFinding[]>((acc, item) => {
+      const finding = mapOmimEntryToFinding(item.entry);
+      if (finding) acc.push(finding);
+      return acc;
+    }, []);
+  } catch (error) {
+    logger.error('OMIM search error', { error: String(error) });
+    return [];
+  }
 }
 
 function generateSynthesis(query: string, findings: ResearchFinding[], context?: string): string {

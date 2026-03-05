@@ -2,6 +2,7 @@ import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 
 import { logger } from '../utils/logger.js';
+import { NCBI_BASE_URL, ncbiFetch } from '../utils/ncbi-rate-limiter.js';
 
 const PubMedArticleSchema = z.object({
   pmid: z.string().describe('PubMed article ID'),
@@ -43,8 +44,6 @@ const eFetchResultSchema = z.object({
   result: z.record(z.string(), z.unknown()),
 });
 
-const PUBMED_BASE_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
-
 export const pubmedSearchTool = createTool({
   id: 'pubmed-search',
   description:
@@ -68,9 +67,9 @@ export const pubmedSearchTool = createTool({
 
     logger.info('Searching PubMed', { query, maxResults });
 
-    const searchUrl = `${PUBMED_BASE_URL}/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${maxResults}&retmode=json`;
+    const searchUrl = `${NCBI_BASE_URL}/esearch.fcgi?db=pubmed&term=${encodeURIComponent(query)}&retmax=${maxResults}&retmode=json`;
 
-    const searchResponse = await fetch(searchUrl);
+    const searchResponse = await ncbiFetch(searchUrl);
     if (!searchResponse.ok) {
       logger.error('PubMed search failed', { status: searchResponse.status });
       return { articles: [], totalCount: 0, query };
@@ -85,8 +84,8 @@ export const pubmedSearchTool = createTool({
       return { articles: [], totalCount: 0, query };
     }
 
-    const summaryUrl = `${PUBMED_BASE_URL}/esummary.fcgi?db=pubmed&id=${ids.join(',')}&retmode=json`;
-    const summaryResponse = await fetch(summaryUrl);
+    const summaryUrl = `${NCBI_BASE_URL}/esummary.fcgi?db=pubmed&id=${ids.join(',')}&retmode=json`;
+    const summaryResponse = await ncbiFetch(summaryUrl);
 
     if (!summaryResponse.ok) {
       logger.error('PubMed summary fetch failed', { status: summaryResponse.status });

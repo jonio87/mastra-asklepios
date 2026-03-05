@@ -3,6 +3,7 @@ import { Agent } from '@mastra/core/agent';
 import { memory } from '../memory.js';
 import { brainFeedTool } from '../tools/brain-feed.js';
 import { brainRecallTool } from '../tools/brain-recall.js';
+import { clinvarLookupTool } from '../tools/clinvar-lookup.js';
 import { deepResearchTool } from '../tools/deep-research.js';
 import { documentParserTool } from '../tools/document-parser.js';
 import { hpoMapperTool } from '../tools/hpo-mapper.js';
@@ -19,7 +20,7 @@ import { synthesisAgent } from './synthesis-agent.js';
  * Configures routing instructions and iteration tracking for diagnostic workflows.
  */
 export const defaultNetworkOptions: NetworkOptions = {
-  maxSteps: 10,
+  maxSteps: 15,
   routing: {
     additionalInstructions: `You are orchestrating a rare disease diagnostic workflow. Route tasks to the most appropriate specialist agent:
 
@@ -137,6 +138,7 @@ Update it actively as you learn new information. The update-working-memory tool 
   tools: {
     pubmedSearch: pubmedSearchTool,
     orphanetLookup: orphanetLookupTool,
+    clinvarLookup: clinvarLookupTool,
     hpoMapper: hpoMapperTool,
     documentParser: documentParserTool,
     deepResearch: deepResearchTool,

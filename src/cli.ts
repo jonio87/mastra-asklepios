@@ -12,6 +12,7 @@ import {
 } from './cli-utils.js';
 import { mastra } from './mastra.js';
 import { logger } from './utils/logger.js';
+import { resolveMaxSteps } from './utils/max-steps.js';
 import { traceOnFinish, traceOnStepFinish } from './utils/observability.js';
 import {
   createSessionUsage,
@@ -79,7 +80,7 @@ async function streamDirectResponse(userMessage: string, session: Session): Prom
 
   const result = await agent.stream(userMessage, {
     runId,
-    maxSteps: 10,
+    maxSteps: resolveMaxSteps(userMessage),
     memory: {
       thread: session.threadId,
       resource: session.resourceId,
@@ -153,7 +154,7 @@ async function streamNetworkResponse(userMessage: string, session: Session): Pro
       resource: session.resourceId,
     },
     ...(patientInstructions ? { instructions: patientInstructions } : {}),
-    maxSteps: 10,
+    maxSteps: resolveMaxSteps(userMessage),
   });
 
   const reader = networkStream.getReader();
