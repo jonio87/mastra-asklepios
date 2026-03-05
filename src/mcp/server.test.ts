@@ -4,8 +4,11 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerPrompts } from './prompts.js';
 import { registerResources } from './resources.js';
 import { registerAgentTools } from './tools-agents.js';
+import { registerClinicalTools } from './tools-clinical.js';
 import { registerCoreTools } from './tools-core.js';
+import { registerSessionTools } from './tools-session.js';
 import { registerStateTools } from './tools-state.js';
+import { registerStreamingTools } from './tools-streaming.js';
 import { registerTaskTools } from './tools-tasks.js';
 import { registerWorkflowTools } from './tools-workflows.js';
 
@@ -25,6 +28,27 @@ jest.mock('../mastra.js', () => ({
       runs: new Map(),
     })),
   },
+}));
+
+jest.mock('../cli-core.js', () => ({
+  streamDirect: jest.fn(),
+  streamNetwork: jest.fn(),
+}));
+
+jest.mock('../tools/capture-data.js', () => ({
+  captureDataTool: { execute: jest.fn() },
+}));
+
+jest.mock('../tools/query-data.js', () => ({
+  queryDataTool: { execute: jest.fn() },
+}));
+
+jest.mock('../tools/ingest-document.js', () => ({
+  ingestDocumentTool: { execute: jest.fn() },
+}));
+
+jest.mock('../tools/knowledge-query.js', () => ({
+  knowledgeQueryTool: { execute: jest.fn() },
 }));
 
 jest.mock('../memory.js', () => ({
@@ -220,6 +244,93 @@ describe('MCP Server', () => {
     });
   });
 
+  describe('registerClinicalTools', () => {
+    const server = createTestServer();
+    registerClinicalTools(server);
+    const { tools } = getServerInternals(server);
+    const toolNames = Object.keys(tools);
+
+    it('registers exactly 4 clinical tools', () => {
+      expect(toolNames.length).toBe(4);
+    });
+
+    it.each([
+      'capture_clinical_data',
+      'query_clinical_data',
+      'ingest_document',
+      'search_knowledge',
+    ])('registers %s', (name) => {
+      expect(toolNames).toContain(name);
+    });
+  });
+
+  describe('registerSessionTools', () => {
+    const server = createTestServer();
+    registerSessionTools(server);
+    const { tools } = getServerInternals(server);
+    const toolNames = Object.keys(tools);
+
+    it('registers exactly 3 session tools', () => {
+      expect(toolNames.length).toBe(3);
+    });
+
+    it.each(['create_thread', 'switch_patient', 'get_token_usage'])('registers %s', (name) => {
+      expect(toolNames).toContain(name);
+    });
+  });
+
+  describe('registerStreamingTools', () => {
+    const server = createTestServer();
+    registerStreamingTools(server);
+    const { tools } = getServerInternals(server);
+    const toolNames = Object.keys(tools);
+
+    it('registers exactly 2 streaming tools', () => {
+      expect(toolNames.length).toBe(2);
+    });
+
+    it.each(['stream_asklepios', 'stream_network'])('registers %s', (name) => {
+      expect(toolNames).toContain(name);
+    });
+  });
+
+  describe('tool annotations', () => {
+    const server = createTestServer();
+    registerCoreTools(server);
+    registerClinicalTools(server);
+    const { tools } = getServerInternals(server);
+
+    it('read-only tools have readOnlyHint: true', () => {
+      const readOnlyTools = [
+        'search_pubmed',
+        'lookup_orphanet',
+        'lookup_clinvar',
+        'map_symptoms',
+        'recall_brain',
+        'query_clinical_data',
+        'search_knowledge',
+      ];
+      for (const name of readOnlyTools) {
+        const tool = tools[name] as Record<string, unknown> | undefined;
+        if (tool) {
+          const annotations = tool['annotations'] as Record<string, unknown> | undefined;
+          expect(annotations?.['readOnlyHint']).toBe(true);
+        }
+      }
+    });
+
+    it('write tools have destructiveHint: false', () => {
+      const writeTools = ['ask_asklepios', 'capture_clinical_data', 'ingest_document'];
+      for (const name of writeTools) {
+        const tool = tools[name] as Record<string, unknown> | undefined;
+        if (tool) {
+          const annotations = tool['annotations'] as Record<string, unknown> | undefined;
+          expect(annotations?.['destructiveHint']).toBe(false);
+        }
+      }
+    });
+  });
+
   describe('module exports', () => {
     it('exports registerCoreTools as function', () => {
       expect(typeof registerCoreTools).toBe('function');
@@ -243,6 +354,18 @@ describe('MCP Server', () => {
 
     it('exports registerPrompts as function', () => {
       expect(typeof registerPrompts).toBe('function');
+    });
+
+    it('exports registerClinicalTools as function', () => {
+      expect(typeof registerClinicalTools).toBe('function');
+    });
+
+    it('exports registerSessionTools as function', () => {
+      expect(typeof registerSessionTools).toBe('function');
+    });
+
+    it('exports registerStreamingTools as function', () => {
+      expect(typeof registerStreamingTools).toBe('function');
     });
   });
 });

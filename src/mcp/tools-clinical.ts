@@ -5,6 +5,7 @@ import { captureDataTool } from '../tools/capture-data.js';
 import { ingestDocumentTool } from '../tools/ingest-document.js';
 import { knowledgeQueryTool } from '../tools/knowledge-query.js';
 import { queryDataTool } from '../tools/query-data.js';
+import { mcpLog, notifyResourceUpdated } from './notifications.js';
 
 /**
  * Clinical data tools — Layer 2 structured clinical record + Layer 3 document knowledge base.
@@ -147,6 +148,16 @@ export function registerClinicalTools(server: McpServer): void {
       const toolInput = buildCaptureInput(input);
 
       const result = await captureDataTool.execute(toolInput, { mastra });
+      const patientId = gs(input, 'patientId');
+
+      // Notify subscribed clients that patient data changed
+      mcpLog(
+        server,
+        'info',
+        { tool: 'capture_clinical_data', type: gs(input, 'type'), patientId },
+        'clinical',
+      );
+      notifyResourceUpdated(server, `patient://${patientId}/profile`);
 
       return {
         content: [
@@ -257,6 +268,15 @@ export function registerClinicalTools(server: McpServer): void {
       }
 
       const result = await ingestDocumentTool.execute(input, { mastra });
+      const patientId = gs(input, 'patientId');
+
+      mcpLog(
+        server,
+        'info',
+        { tool: 'ingest_document', patientId, documentType: gs(input, 'documentType') },
+        'knowledge',
+      );
+      notifyResourceUpdated(server, `patient://${patientId}/profile`);
 
       return {
         content: [

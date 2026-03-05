@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "asklepios": {
+      "command": "node",
+      "args": ["dist/mcp/stdio.js"],
+      "cwd": "/Users/andrzej/Documents/GitHub/mastra-asklepios",
+      "env": {
+        "ASKLEPIOS_AUTH": "claude-code",
+        "NODE_ENV": "development"
+      }
+    }
+  }
+}

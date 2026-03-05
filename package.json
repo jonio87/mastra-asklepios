@@ -25,12 +25,17 @@
     "typecheck:watch": "tsc --noEmit --watch",
     "check": "npm run typecheck && npm run lint && npm run test",
     "check:fix": "npm run lint:fix && npm run typecheck && npm run test",
-    "pre-commit": "npm run check"
+    "pre-commit": "npm run check",
+    "mcp:stdio": "node --env-file=.env dist/mcp/stdio.js",
+    "mcp:http": "node --env-file=.env dist/mcp/http.js",
+    "a2a": "node --env-file=.env dist/a2a/server.js",
+    "serve": "node --env-file=.env dist/server.js"
   },
   "engines": {
     "node": ">=22.0.0"
   },
   "dependencies": {
+    "@a2a-js/sdk": "^0.3.10",
     "@ai-sdk/anthropic": "^3.0.56",
     "@ai-sdk/openai": "^3.0.41",
     "@inkjs/ui": "^2.0.0",
@@ -40,12 +45,14 @@
     "@mastra/memory": "^1.6.0",
     "@mastra/rag": "^2.1.2",
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "express": "^5.2.1",
     "ink": "^6.8.0",
     "react": "^19.2.4",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
+    "@types/express": "^5.0.6",
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.14",
     "ink-testing-library": "^4.0.0",
