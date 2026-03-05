@@ -5,12 +5,15 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "mastra-asklepios": "dist/cli.js"
+    "mastra-asklepios": "dist/cli.js",
+    "asklepios-tui": "dist/tui.js"
   },
   "scripts": {
     "build": "tsc",
     "dev": "mastra dev",
-    "start": "node dist/cli.js",
+    "start": "node --env-file=.env dist/tui.js",
+    "start:repl": "node --env-file=.env dist/cli.js",
+    "tui": "node --env-file=.env dist/tui.js",
     "test": "node --experimental-vm-modules node_modules/.bin/jest --passWithNoTests --forceExit",
     "test:single": "node --experimental-vm-modules node_modules/.bin/jest --passWithNoTests",
     "test:watch": "node --experimental-vm-modules node_modules/.bin/jest --watch",
@@ -30,15 +33,20 @@
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.56",
     "@ai-sdk/openai": "^3.0.41",
+    "@inkjs/ui": "^2.0.0",
     "@mastra/core": "^1.9.0",
     "@mastra/libsql": "^1.6.3",
     "@mastra/memory": "^1.6.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "ink": "^6.8.0",
+    "react": "^19.2.4",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
     "@types/node": "^22.0.0",
+    "@types/react": "^19.2.14",
+    "ink-testing-library": "^4.0.0",
     "jest": "^29.7.0",
     "ts-jest": "^29.3.0",
     "tsx": "^4.19.0",

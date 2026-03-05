@@ -1,19 +1,10 @@
 #!/usr/bin/env node
 
 import * as readline from 'node:readline';
+import { handleResume, streamAgent } from './cli-core.js';
 import type { Session } from './cli-utils.js';
-import {
-  AGENT_ID,
-  createSession,
-  getPatientInstructions,
-  getPrompt,
-  handleCommand,
-  parseArgs,
-} from './cli-utils.js';
-import { mastra } from './mastra.js';
+import { createSession, getPrompt, handleCommand, parseArgs } from './cli-utils.js';
 import { logger } from './utils/logger.js';
-import { resolveMaxSteps } from './utils/max-steps.js';
-import { traceOnFinish, traceOnStepFinish } from './utils/observability.js';
 import {
   createSessionUsage,
   formatSessionUsage,
@@ -23,176 +14,35 @@ import {
 
 const sessionUsage = createSessionUsage();
 
-// ─── Workflow Resume ────────────────────────────────────────────────────────
+// ─── Streaming via cli-core event generators ────────────────────────────────
 
-async function handleResumeCommand(input: string): Promise<void> {
-  const parts = input.split(/\s+/);
-  const workflowId = parts[1];
-  const stepId = parts[2];
-  const resumeDataRaw = parts.slice(3).join(' ');
+async function writeStreamToStdout(message: string, session: Session): Promise<void> {
+  const stream = streamAgent(message, session);
 
-  if (!(workflowId && stepId)) {
-    process.stdout.write(
-      'Usage: /resume <workflowId> <stepId> [resumeData as JSON]\n' +
-        'Example: /resume patient-intake review-phenotypes \'{"approvedIndices":[0,1,2]}\'\n' +
-        'Example: /resume diagnostic-research review-findings \'{"approvedFindingIndices":[0,1,2]}\'\n' +
-        '\nAvailable workflows: patient-intake, diagnostic-research\n',
-    );
-    return;
-  }
-
-  let resumeData: unknown = {};
-  if (resumeDataRaw) {
-    try {
-      resumeData = JSON.parse(resumeDataRaw);
-    } catch {
-      process.stdout.write('\x1b[31mInvalid JSON in resume data\x1b[0m\n');
-      return;
+  for await (const event of stream) {
+    switch (event.type) {
+      case 'text':
+        process.stdout.write(event.content);
+        break;
+      case 'agent-label':
+        process.stdout.write(`\n\x1b[36m[${event.agentId}]\x1b[0m `);
+        break;
+      case 'usage':
+        recordUsage(sessionUsage, event.data);
+        process.stdout.write(`\x1b[90m[${formatUsage(event.data)}]\x1b[0m\n`);
+        break;
+      case 'error':
+        process.stdout.write(`\n\x1b[31mError: ${event.message}\x1b[0m\n`);
+        break;
+      case 'done':
+        break;
     }
-  }
-
-  const validWorkflows = ['patient-intake', 'diagnostic-research'] as const;
-  if (!validWorkflows.includes(workflowId as (typeof validWorkflows)[number])) {
-    process.stdout.write(`\x1b[31mUnknown workflow: ${workflowId}\x1b[0m\n`);
-    return;
-  }
-
-  // getWorkflow returns a union type; cast to access resume() which is available on all Workflow instances
-  const workflow = mastra.getWorkflow(workflowId as 'patient-intake') as unknown as {
-    resume: (params: { step: string; resumeData: unknown }) => Promise<unknown>;
-  };
-  process.stdout.write(`Resuming workflow "${workflowId}" at step "${stepId}"...\n`);
-
-  const result = await workflow.resume({
-    step: stepId,
-    resumeData,
-  });
-
-  process.stdout.write(`\nWorkflow result: ${JSON.stringify(result, null, 2)}\n`);
-}
-
-// ─── Direct Streaming Response ──────────────────────────────────────────────
-
-async function streamDirectResponse(userMessage: string, session: Session): Promise<void> {
-  const agent = mastra.getAgent(AGENT_ID);
-  const patientInstructions = getPatientInstructions(session);
-  const runId = `run-${Date.now()}`;
-
-  const result = await agent.stream(userMessage, {
-    runId,
-    maxSteps: resolveMaxSteps(userMessage),
-    memory: {
-      thread: session.threadId,
-      resource: session.resourceId,
-    },
-    ...(patientInstructions ? { instructions: patientInstructions } : {}),
-    onFinish: traceOnFinish(runId),
-    onStepFinish: traceOnStepFinish(runId),
-  });
-
-  const reader = result.textStream.getReader();
-
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      process.stdout.write(value);
-    }
-  } finally {
-    reader.releaseLock();
   }
 
   process.stdout.write('\n');
-
-  result.usage
-    .then((usage) => {
-      recordUsage(sessionUsage, usage);
-      process.stdout.write(`\x1b[90m[${formatUsage(usage)}]\x1b[0m\n`);
-    })
-    .catch(() => {
-      // Usage data unavailable — silently continue
-    });
 }
 
-// ─── Network Streaming Response ─────────────────────────────────────────────
-
-/** Process a single network stream chunk, printing agent labels and text deltas. */
-function processNetworkChunk(chunk: Record<string, unknown>, currentAgent: { id: string }): void {
-  const chunkType = chunk['type'] as string | undefined;
-  const payload = chunk['payload'] as Record<string, unknown> | undefined;
-
-  if (!(chunkType && payload)) return;
-
-  if (chunkType === 'agent-execution-start') {
-    const agentId = (payload['agentId'] as string) ?? 'unknown';
-    if (agentId !== currentAgent.id) {
-      currentAgent.id = agentId;
-      process.stdout.write(`\n\x1b[36m[${currentAgent.id}]\x1b[0m `);
-    }
-    return;
-  }
-
-  if (!chunkType.startsWith('agent-execution-event-')) return;
-
-  const innerType = (payload['type'] as string) ?? '';
-  if (innerType !== 'text-delta') return;
-
-  const innerPayload = payload['payload'] as Record<string, unknown> | undefined;
-  const text = (innerPayload?.['text'] as string) ?? '';
-  if (text) process.stdout.write(text);
-}
-
-async function streamNetworkResponse(userMessage: string, session: Session): Promise<void> {
-  const agent = mastra.getAgent(AGENT_ID);
-  const patientInstructions = getPatientInstructions(session);
-
-  process.stdout.write('\x1b[90m[network mode — routing to specialized agents]\x1b[0m\n');
-
-  const networkStream = await agent.network(userMessage, {
-    memory: {
-      thread: session.threadId,
-      resource: session.resourceId,
-    },
-    ...(patientInstructions ? { instructions: patientInstructions } : {}),
-    maxSteps: resolveMaxSteps(userMessage),
-  });
-
-  const reader = networkStream.getReader();
-  const currentAgent = { id: '' };
-
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      processNetworkChunk(value as Record<string, unknown>, currentAgent);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  process.stdout.write('\n');
-
-  networkStream.usage
-    .then((usage) => {
-      recordUsage(sessionUsage, usage);
-      process.stdout.write(`\x1b[90m[${formatUsage(usage)}]\x1b[0m\n`);
-    })
-    .catch(() => {
-      // Usage data unavailable — silently continue
-    });
-}
-
-// ─── Streaming Response (dispatches to direct or network) ───────────────────
-
-async function streamResponse(userMessage: string, session: Session): Promise<void> {
-  if (session.networkMode) {
-    await streamNetworkResponse(userMessage, session);
-  } else {
-    await streamDirectResponse(userMessage, session);
-  }
-}
-
-// ─── Slash Command Handling ──────────────────────────────────────────────────
+// ─── Slash Command Handling ─────────────────────────────────────────────────
 
 interface SlashCommandResult {
   session: Session;
@@ -207,7 +57,8 @@ async function handleSlashCommand(input: string, session: Session): Promise<Slas
 
   if (input.startsWith('/resume')) {
     try {
-      await handleResumeCommand(input);
+      const result = await handleResume(input);
+      process.stdout.write(`${result.output}\n`);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       process.stdout.write(`\x1b[31mResume error: ${message}\x1b[0m\n`);
@@ -222,7 +73,7 @@ async function handleSlashCommand(input: string, session: Session): Promise<Slas
 
 // ─── REPL Main Loop ─────────────────────────────────────────────────────────
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const { patientId } = parseArgs(process.argv.slice(2));
 
   let session = createSession(patientId ? `patient-${patientId}` : undefined);
@@ -265,7 +116,7 @@ async function main(): Promise<void> {
     }
 
     try {
-      await streamResponse(input, session);
+      await writeStreamToStdout(input, session);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error('Agent error', { error: message });
@@ -303,7 +154,6 @@ async function main(): Promise<void> {
 
   rl.on('close', () => {
     if (processing) {
-      // Wait for pending operations before exiting
       const check = setInterval(() => {
         if (!processing) {
           clearInterval(check);
@@ -316,9 +166,14 @@ async function main(): Promise<void> {
   });
 }
 
-main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  logger.error('Fatal error', { error: message });
-  process.stderr.write(`Fatal: ${message}\n`);
-  process.exit(1);
-});
+// Auto-run when executed directly (not imported as a module by tui.tsx)
+const isDirectRun = process.argv[1]?.endsWith('/cli.js') || process.argv[1]?.endsWith('/cli.ts');
+
+if (isDirectRun) {
+  main().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error('Fatal error', { error: message });
+    process.stderr.write(`Fatal: ${message}\n`);
+    process.exit(1);
+  });
+}

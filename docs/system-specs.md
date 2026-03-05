@@ -2,8 +2,8 @@
 
 > Rare Disease Research Agent with Diagnostic Odyssey Compression
 
-**Version:** 0.2.0
-**Status:** Core implementation complete + Phase 8 enhancements (ClinVar, rate limiting, dynamic maxSteps, MCP Tasks)
+**Version:** 0.3.0
+**Status:** Core implementation complete + Phase 8 enhancements + Ink TUI (split-pane terminal interface)
 
 ---
 
@@ -27,6 +27,7 @@ The killer feature is **Cross-Patient Observational Memory** — powered by Mast
 | LLM | Claude Sonnet 4 via @ai-sdk/anthropic | ^3.0.56 |
 | Embeddings | OpenAI text-embedding-3-small via @ai-sdk/openai | latest |
 | Validation | Zod | ^4.3.6 |
+| Terminal UI | Ink (React for CLI) + @inkjs/ui | ink ^6.8.0, react ^19.2.4 |
 | Linting | Biome v2 | ^2.4.4 |
 | Testing | Jest + ts-jest (ESM) | ^29.7.0 |
 
@@ -75,9 +76,19 @@ src/
 │   ├── ncbi-rate-limiter.ts   # Shared NCBI eUtils rate limiter with exponential backoff
 │   └── max-steps.ts           # Dynamic maxSteps resolution based on query complexity
 ├── memory.ts                  # Shared Memory + Storage instances
+├── tui/                       # Ink TUI components (split-pane terminal UI)
+│   ├── App.tsx                # Root component (session, keyboard shortcuts)
+│   ├── Header.tsx             # Status bar (patient, thread, mode, tokens)
+│   ├── ConversationPane.tsx   # Scrollable message list with streaming
+│   ├── MessageBubble.tsx      # Role-based message styling
+│   ├── InputBar.tsx           # TextInput with slash command support
+│   ├── useAsklepios.ts        # Hook encapsulating agent interaction logic
+│   └── types.ts               # Shared Message interface
 ├── mastra.ts                  # Mastra instance (agent/workflow registry)
-├── cli.ts                     # Interactive REPL entry point
+├── cli-core.ts                # Event-based streaming (shared by REPL + TUI)
+├── cli.ts                     # Interactive REPL entry point (fallback)
 ├── cli-utils.ts               # CLI session management & command parsing
+├── tui.tsx                    # TUI entry point (default)
 └── index.ts                   # Library export
 ```
 
@@ -221,16 +232,43 @@ Both workflows support **Human-in-the-Loop (HITL)** suspend/resume for critical 
 
 ---
 
-## CLI Interface
+## Terminal Interface
 
-Interactive REPL for direct agent interaction:
+Two UI modes share the same business logic via `cli-core.ts` event-based streaming:
+
+### TUI Mode (default) — Ink Split-Pane Layout
 
 ```bash
-npm start                        # Launch REPL
-npm start -- --patient marfan-42 # Launch with patient context
+npm start                        # Launch TUI (default)
+npm start -- --patient marfan-42 # Launch TUI with patient context
+npm run tui                      # Alias for npm start
 ```
 
-### Commands
+**Layout:**
+- **Header bar**: App title, patient context, thread ID (8 chars), network mode `[NET]/[DIRECT]`, live token counters
+- **Conversation pane**: Scrollable message list using Ink `<Static>` for completed messages (no re-renders), live streaming with `<Spinner>` while waiting for first token
+- **Input bar**: `<TextInput>` with slash command tab completion, disabled during streaming
+
+**Keyboard shortcuts:**
+- `Ctrl+N` — new thread
+- `Ctrl+T` — toggle network mode
+- `Ctrl+C` — exit
+
+**Components:** `App.tsx` (root) → `Header.tsx`, `ConversationPane.tsx` → `MessageBubble.tsx`, `InputBar.tsx`
+**State management:** `useAsklepios` hook encapsulates all agent interaction, consuming `StreamEvent` generators from `cli-core.ts`
+
+**Tech:** React 19 + Ink 6.8 + @inkjs/ui (TextInput, Spinner)
+
+### REPL Mode (fallback)
+
+```bash
+npm run start:repl                        # Launch readline REPL
+npm run start:repl -- --patient marfan-42 # REPL with patient context
+```
+
+Readline-based text interface for scripting, piping, and environments without full terminal support.
+
+### Commands (both modes)
 | Command | Action |
 |---------|--------|
 | `/help` | Show available commands |
@@ -242,6 +280,16 @@ npm start -- --patient marfan-42 # Launch with patient context
 | `/network` | Toggle network mode (multi-agent routing) |
 | `/resume <wf> <step> [json]` | Resume a suspended workflow with optional data |
 | `/quit` | Exit |
+
+### Event-Based Architecture
+
+`cli-core.ts` yields typed `StreamEvent` objects instead of writing directly to stdout:
+
+```
+StreamEvent = text | agent-label | usage | error | done
+```
+
+Both REPL (`cli.ts`) and TUI (`tui.tsx`) consume the same async generators, ensuring identical business logic regardless of rendering layer.
 
 ---
 
@@ -437,9 +485,9 @@ Intelligent step limit scaling via `resolveMaxSteps(message)` (`src/utils/max-st
 ## Testing
 
 ### Unit Tests
-- **315 tests** across 29 passing test suites
-- Colocated test files (`*.test.ts` next to source)
-- Coverage: tools (schema validation + execution), agents (config verification + network configuration + dynamic maxSteps), workflows (schema + structure + HITL suspend/resume schemas), processors (input/output behavior), CLI (command parsing + session management + network toggle), MCP server (registration tests for all 20 tools, 7 resources, 4 prompts + task-based tools), utils (model router, logger, usage tracker, observability, NCBI rate limiter, maxSteps resolver), ClinVar lookup (query building, schema validation)
+- **335 tests** across 32 passing test suites
+- Colocated test files (`*.test.ts` / `*.test.tsx` next to source)
+- Coverage: tools (schema validation + execution), agents (config verification + network configuration + dynamic maxSteps), workflows (schema + structure + HITL suspend/resume schemas), processors (input/output behavior), CLI (command parsing + session management + network toggle + cli-core event types), MCP server (registration tests for all 20 tools, 7 resources, 4 prompts + task-based tools), utils (model router, logger, usage tracker, observability, NCBI rate limiter, maxSteps resolver), ClinVar lookup (query building, schema validation), TUI components (Header rendering, MessageBubble role-based styling, token display)
 
 ### MCP Integration Tests
 - `scripts/test-mcp-integration.ts` — exercises MCP tools, resources, prompts via MCP SDK client

@@ -5,12 +5,16 @@ Mastra AI agent project — Asklepios.
 ## Architecture
 
 ```
-{{Draw your architecture here. Example:}}
 src/
 ├── agents/       # Agent definitions and prompts
 ├── tools/        # Mastra tools (wrappers around external APIs / DB)
 ├── workflows/    # Multi-step orchestration workflows
-└── utils/        # Shared utilities (logger, validation)
+├── tui/          # Ink TUI components (React for terminal, .tsx files)
+├── mcp/          # MCP server (tools, resources, prompts, tasks)
+├── utils/        # Shared utilities (logger, validation)
+├── cli-core.ts   # Event-based streaming (shared by REPL + TUI)
+├── cli.ts        # REPL entry point (fallback)
+└── tui.tsx       # TUI entry point (default)
 ```
 
 ## Commands
@@ -118,3 +122,8 @@ Don't read these upfront — load them when relevant to your current task:
 - [2026-03-05] [Dynamic maxSteps] Hardcoded maxSteps insufficient: simple chat needs 5, research needs 15, deep diagnosis needs 20. Keyword-based heuristic with env var override (ASKLEPIOS_MAX_STEPS) balances efficiency and capability.
 - [2026-03-05] [MCP Tasks API] MCP SDK v1.27.1 experimental tasks: registerToolTask() does NOT accept inputSchema in config — it's inferred from generic type parameter. Handler methods: createTask/getTask/getTaskResult with RequestTaskStore.
 - [2026-03-05] [OMIM API] Requires free API key (omim.org registration). Entry prefix indicates type: `*` = gene, `#` = phenotype, `%` = cytogenetic region. Map to evidence levels for research findings.
+- [2026-03-05] [Ink 6.x] Requires React >=19.0.0 (not 18.x). Package exports only from main entry point (`ink`), not sub-paths (`ink/build/components/Box.js`). Import everything from `ink`.
+- [2026-03-05] [exactOptionalPropertyTypes] With strict TS, `agentId?: string` means the property is either missing OR a string — cannot assign `string | undefined`. Use conditional object spread or mutation to set optional fields.
+- [2026-03-05] [Ink TUI architecture] Event-based streaming (`cli-core.ts`) decouples business logic from rendering. Both REPL and TUI consume same `AsyncGenerator<StreamEvent>` — identical agent behavior, different UIs.
+- [2026-03-05] [Ink Static] Use `<Static items={[...]}>` for completed messages — prevents re-rendering when new text streams in. Critical for streaming performance in long conversations.
+- [2026-03-05] [Biome React] React components must be PascalCase but Biome enforces camelCase for functions. Add `.tsx` override in biome.json allowing `["camelCase", "PascalCase"]` for function names.
