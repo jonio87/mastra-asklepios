@@ -29,7 +29,7 @@ export function registerWorkflowTools(server: McpServer): void {
           .optional()
           .describe('Type of clinical document (default: auto-detected)'),
       },
-      annotations: { destructiveHint: false, idempotentHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     },
     async ({ documentText, patientId, documentType }) => {
       const workflow = mastra.getWorkflow('patient-intake');
@@ -71,7 +71,7 @@ export function registerWorkflowTools(server: McpServer): void {
           .optional()
           .describe('Specific research focus or question to guide the search'),
       },
-      annotations: { destructiveHint: false, idempotentHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     },
     async ({ patientId, symptoms, hpoTerms, researchFocus }) => {
       const workflow = mastra.getWorkflow('diagnostic-research');
@@ -110,7 +110,7 @@ export function registerWorkflowTools(server: McpServer): void {
             'JSON string with resume data (e.g., {"approvedPhenotypes": [...], "notes": "..."})',
           ),
       },
-      annotations: { destructiveHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: false },
     },
     async ({ workflowId, runId, stepId, resumeData }) => {
       const workflow = mastra.getWorkflow(workflowId);

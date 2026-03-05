@@ -18,7 +18,7 @@ export function registerAgentTools(server: McpServer): void {
         patientId: z.string().optional().describe('Patient resource ID for memory scoping'),
         threadId: z.string().optional().describe('Thread ID to continue a conversation'),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: false },
     },
     async ({ message, patientId, threadId }) => {
       const agent = mastra.getAgent('phenotypeAgent');
@@ -45,7 +45,7 @@ export function registerAgentTools(server: McpServer): void {
         patientId: z.string().optional().describe('Patient resource ID for memory scoping'),
         threadId: z.string().optional().describe('Thread ID to continue a conversation'),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: false },
     },
     async ({ message, patientId, threadId }) => {
       const agent = mastra.getAgent('researchAgent');
@@ -74,7 +74,7 @@ export function registerAgentTools(server: McpServer): void {
         patientId: z.string().optional().describe('Patient resource ID for memory scoping'),
         threadId: z.string().optional().describe('Thread ID to continue a conversation'),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: false },
     },
     async ({ message, patientId, threadId }) => {
       const agent = mastra.getAgent('synthesisAgent');
@@ -101,7 +101,7 @@ export function registerAgentTools(server: McpServer): void {
           .string()
           .describe('Anonymized case observation or pattern query for the brain agent'),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: false, destructiveHint: false },
     },
     async ({ message }) => {
       const agent = mastra.getAgent('asklepios-brain');

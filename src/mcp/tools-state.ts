@@ -20,7 +20,7 @@ export function registerStateTools(server: McpServer): void {
       inputSchema: {
         resourceId: z.string().describe('Patient resource ID (e.g., "patient-eds-01")'),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
     async ({ resourceId }) => {
       const memoryStore = await storage.getStore('memory');
@@ -79,7 +79,7 @@ export function registerStateTools(server: McpServer): void {
           .optional()
           .describe('Maximum number of threads to return (default: 10)'),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
     async ({ resourceId, limit }) => {
       const memoryStore = await storage.getStore('memory');
@@ -136,7 +136,7 @@ export function registerStateTools(server: McpServer): void {
           .optional()
           .describe('Maximum number of messages to return (default: 20)'),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
     async ({ threadId, limit }) => {
       const memoryStore = await storage.getStore('memory');
@@ -197,7 +197,7 @@ export function registerStateTools(server: McpServer): void {
           .optional()
           .describe('Type of clinical document (default: auto-detected)'),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
     async ({ text, documentType }) => {
       if (!documentParserTool.execute) {
@@ -238,7 +238,7 @@ export function registerStateTools(server: McpServer): void {
           .optional()
           .describe('Maximum sources to consult (default: 10)'),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
     async ({ query, context, focusAreas, maxSources }) => {
       if (!deepResearchTool.execute) {

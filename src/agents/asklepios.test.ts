@@ -20,9 +20,9 @@ describe('asklepiosAgent', () => {
     expect(instructions).toContain('not a doctor');
   });
 
-  it('has instructions about cross-patient intelligence', async () => {
+  it('has instructions about three-layer architecture', async () => {
     const instructions = await asklepiosAgent.getInstructions();
-    expect(instructions).toContain('Cross-Patient Intelligence');
+    expect(instructions).toContain('Three-Layer Clinical Knowledge Architecture');
   });
 
   it('has all required tools configured', () => {

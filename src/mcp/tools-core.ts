@@ -29,7 +29,7 @@ export function registerCoreTools(server: McpServer): void {
           .optional()
           .describe('Thread ID to continue a conversation. Omit for new thread.'),
       },
-      annotations: { readOnlyHint: false },
+      annotations: { readOnlyHint: false, destructiveHint: false },
     },
     async ({ message, patientId, threadId }) => {
       const agent = mastra.getAgent('asklepios');
@@ -70,7 +70,7 @@ export function registerCoreTools(server: McpServer): void {
           .optional()
           .describe('Maximum number of results (default: 10)'),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
     async ({ query, maxResults }) => {
       if (!pubmedSearchTool.execute) {
@@ -113,7 +113,7 @@ export function registerCoreTools(server: McpServer): void {
           .optional()
           .describe('Maximum number of search results (default: 5)'),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
     async ({ query, orphaCode, maxResults }) => {
       if (!orphanetLookupTool.execute) {
@@ -160,7 +160,7 @@ export function registerCoreTools(server: McpServer): void {
           .optional()
           .describe('Maximum number of results to return (default: 10)'),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
     async ({ query, gene, variant, maxResults }) => {
       if (!clinvarLookupTool.execute) {
@@ -202,7 +202,7 @@ export function registerCoreTools(server: McpServer): void {
             'List of symptoms to map (e.g., ["joint hypermobility", "skin hyperextensibility"])',
           ),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
     async ({ symptoms }) => {
       if (!hpoMapperTool.execute) {
@@ -238,7 +238,7 @@ export function registerCoreTools(server: McpServer): void {
           .optional()
           .describe('HPO term IDs for precise matching (e.g., ["HP:0001252"])'),
       },
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false },
     },
     async ({ symptoms, hpoTerms }) => {
       if (!brainRecallTool.execute) {
