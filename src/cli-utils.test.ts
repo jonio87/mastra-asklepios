@@ -3,6 +3,7 @@ import {
   AGENT_ID,
   createSession,
   DEFAULT_RESOURCE,
+  getPatientInstructions,
   getPrompt,
   handleCommand,
   parseArgs,
@@ -18,6 +19,7 @@ describe('cli-utils', () => {
       expect(session.threadId).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
       );
+      expect(session.networkMode).toBe(false);
     });
 
     it('creates a session with custom resource', () => {
@@ -39,6 +41,7 @@ describe('cli-utils', () => {
     const session: Session = {
       resourceId: 'patient-test-001',
       threadId: 'test-thread-id',
+      networkMode: false,
     };
 
     it('returns quit for /quit', () => {
@@ -104,6 +107,26 @@ describe('cli-utils', () => {
       expect(result.session).toBe(session);
     });
 
+    it('toggles network mode on with /network', () => {
+      const result = handleCommand('/network', session);
+      expect(result.quit).toBe(false);
+      expect(result.session.networkMode).toBe(true);
+      expect(result.output).toContain('ENABLED');
+    });
+
+    it('toggles network mode off with /network', () => {
+      const networkSession: Session = { ...session, networkMode: true };
+      const result = handleCommand('/network', networkSession);
+      expect(result.session.networkMode).toBe(false);
+      expect(result.output).toContain('DISABLED');
+    });
+
+    it('shows mode in /status output', () => {
+      const result = handleCommand('/status', session);
+      expect(result.output).toContain('Mode');
+      expect(result.output).toContain('direct');
+    });
+
     it('returns error for unknown command', () => {
       const result = handleCommand('/foobar', session);
       expect(result.output).toContain('Unknown command');
@@ -122,23 +145,66 @@ describe('cli-utils', () => {
 
   describe('getPrompt', () => {
     it('shows "asklepios" for default resource', () => {
-      const session: Session = { resourceId: DEFAULT_RESOURCE, threadId: 'x' };
+      const session: Session = { resourceId: DEFAULT_RESOURCE, threadId: 'x', networkMode: false };
       const prompt = getPrompt(session);
       expect(prompt).toContain('asklepios');
     });
 
     it('shows patient ID for patient resource', () => {
-      const session: Session = { resourceId: 'patient-eds-001', threadId: 'x' };
+      const session: Session = { resourceId: 'patient-eds-001', threadId: 'x', networkMode: false };
       const prompt = getPrompt(session);
       expect(prompt).toContain('eds-001');
       expect(prompt).not.toContain('patient-');
     });
 
     it('includes ANSI color codes', () => {
-      const session: Session = { resourceId: DEFAULT_RESOURCE, threadId: 'x' };
+      const session: Session = { resourceId: DEFAULT_RESOURCE, threadId: 'x', networkMode: false };
       const prompt = getPrompt(session);
       expect(prompt).toContain('\x1b[36m');
       expect(prompt).toContain('\x1b[0m');
+    });
+
+    it('shows [net] indicator when network mode is enabled', () => {
+      const session: Session = { resourceId: DEFAULT_RESOURCE, threadId: 'x', networkMode: true };
+      const prompt = getPrompt(session);
+      expect(prompt).toContain('[net]');
+    });
+
+    it('does not show [net] indicator when network mode is disabled', () => {
+      const session: Session = { resourceId: DEFAULT_RESOURCE, threadId: 'x', networkMode: false };
+      const prompt = getPrompt(session);
+      expect(prompt).not.toContain('[net]');
+    });
+  });
+
+  // ─── getPatientInstructions ─────────────────────────────────────────────
+
+  describe('getPatientInstructions', () => {
+    it('returns instructions for patient sessions', () => {
+      const session: Session = { resourceId: 'patient-eds-01', threadId: 'x', networkMode: false };
+      const instructions = getPatientInstructions(session);
+      expect(instructions).toBeDefined();
+      expect(instructions).toContain('eds-01');
+    });
+
+    it('returns undefined for default resource', () => {
+      const session: Session = { resourceId: DEFAULT_RESOURCE, threadId: 'x', networkMode: false };
+      expect(getPatientInstructions(session)).toBeUndefined();
+    });
+
+    it('returns undefined for non-patient resources', () => {
+      const session: Session = { resourceId: 'custom-resource', threadId: 'x', networkMode: false };
+      expect(getPatientInstructions(session)).toBeUndefined();
+    });
+
+    it('extracts complex patient IDs correctly', () => {
+      const session: Session = {
+        resourceId: 'patient-marfan-42',
+        threadId: 'x',
+        networkMode: false,
+      };
+      const instructions = getPatientInstructions(session);
+      expect(instructions).toContain('marfan-42');
     });
   });
 

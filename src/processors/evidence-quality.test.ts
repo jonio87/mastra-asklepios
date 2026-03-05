@@ -38,13 +38,17 @@ describe('evidenceQualityProcessor', () => {
       makeMessage('user', 'Hello'),
       makeMessage('assistant', 'Hi! How can I help you today?'),
     ];
-    const result = evidenceQualityProcessor.processOutputResult!(makeOutputArgs(messages));
+    const processOutput = evidenceQualityProcessor.processOutputResult;
+    expect(processOutput).toBeDefined();
+    const result = processOutput?.(makeOutputArgs(messages));
     expect(result).toEqual(messages);
   });
 
   it('passes through messages with no assistant response', () => {
     const messages = [makeMessage('user', 'What is EDS?')];
-    const result = evidenceQualityProcessor.processOutputResult!(makeOutputArgs(messages));
+    const processOutput = evidenceQualityProcessor.processOutputResult;
+    expect(processOutput).toBeDefined();
+    const result = processOutput?.(makeOutputArgs(messages));
     expect(result).toEqual(messages);
   });
 
@@ -56,14 +60,14 @@ describe('evidenceQualityProcessor', () => {
         'Based on these symptoms, the diagnosis may indicate Ehlers-Danlos Syndrome.',
       ),
     ];
-    const result = evidenceQualityProcessor.processOutputResult!(
-      makeOutputArgs(messages),
-    ) as MastraDBMessage[];
+    const processOutput = evidenceQualityProcessor.processOutputResult;
+    expect(processOutput).toBeDefined();
+    const result = processOutput?.(makeOutputArgs(messages)) as MastraDBMessage[] | undefined;
 
-    const lastMsg = result[result.length - 1];
+    const lastMsg = result?.[result.length - 1];
     expect(lastMsg).toBeDefined();
 
-    const lastPart = lastMsg!.content.parts[lastMsg!.content.parts.length - 1];
+    const lastPart = lastMsg?.content.parts[lastMsg.content.parts.length - 1];
     expect(lastPart).toBeDefined();
     if (lastPart && 'text' in lastPart) {
       expect(lastPart.text).toContain('evidence citations');
@@ -75,14 +79,14 @@ describe('evidenceQualityProcessor', () => {
       makeMessage('user', 'What could this be?'),
       makeMessage('assistant', 'The diagnosis suggests EDS (PMID: 12345678). Confidence: 85%.'),
     ];
-    const result = evidenceQualityProcessor.processOutputResult!(
-      makeOutputArgs(messages),
-    ) as MastraDBMessage[];
+    const processOutput = evidenceQualityProcessor.processOutputResult;
+    expect(processOutput).toBeDefined();
+    const result = processOutput?.(makeOutputArgs(messages)) as MastraDBMessage[] | undefined;
 
-    const lastMsg = result[result.length - 1];
+    const lastMsg = result?.[result.length - 1];
     expect(lastMsg).toBeDefined();
     // Should not have appended any new parts
-    expect(lastMsg!.content.parts).toHaveLength(1);
+    expect(lastMsg?.content.parts).toHaveLength(1);
   });
 
   it('appends low confidence warning when confidence is below threshold', () => {
@@ -93,14 +97,14 @@ describe('evidenceQualityProcessor', () => {
         'The diagnosis may indicate Marfan Syndrome. Confidence: 15%. PMID: 99999.',
       ),
     ];
-    const result = evidenceQualityProcessor.processOutputResult!(
-      makeOutputArgs(messages),
-    ) as MastraDBMessage[];
+    const processOutput = evidenceQualityProcessor.processOutputResult;
+    expect(processOutput).toBeDefined();
+    const result = processOutput?.(makeOutputArgs(messages)) as MastraDBMessage[] | undefined;
 
-    const lastMsg = result[result.length - 1];
+    const lastMsg = result?.[result.length - 1];
     expect(lastMsg).toBeDefined();
 
-    const appendedPart = lastMsg!.content.parts[lastMsg!.content.parts.length - 1];
+    const appendedPart = lastMsg?.content.parts[lastMsg.content.parts.length - 1];
     expect(appendedPart).toBeDefined();
     if (appendedPart && 'text' in appendedPart) {
       expect(appendedPart.text).toContain('Low Confidence Alert');
@@ -116,11 +120,11 @@ describe('evidenceQualityProcessor', () => {
         'The diagnosis is consistent with EDS type III. Confidence: 75%. PMID: 11111.',
       ),
     ];
-    const result = evidenceQualityProcessor.processOutputResult!(
-      makeOutputArgs(messages),
-    ) as MastraDBMessage[];
+    const processOutput = evidenceQualityProcessor.processOutputResult;
+    expect(processOutput).toBeDefined();
+    const result = processOutput?.(makeOutputArgs(messages)) as MastraDBMessage[] | undefined;
 
-    const lastMsg = result[result.length - 1];
-    expect(lastMsg!.content.parts).toHaveLength(1);
+    const lastMsg = result?.[result.length - 1];
+    expect(lastMsg?.content.parts).toHaveLength(1);
   });
 });

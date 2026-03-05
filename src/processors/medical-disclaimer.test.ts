@@ -38,7 +38,9 @@ describe('medicalDisclaimerProcessor', () => {
 
   it('injects disclaimer into system messages when missing', () => {
     const messages = [makeMessage('user', 'What rare diseases match these symptoms?')];
-    const result = medicalDisclaimerProcessor.processInput!(makeArgs(messages));
+    const processInput = medicalDisclaimerProcessor.processInput;
+    expect(processInput).toBeDefined();
+    const result = processInput?.(makeArgs(messages));
 
     expect(result).toHaveProperty('systemMessages');
     const { systemMessages } = result as { systemMessages: Array<{ content: string }> };
@@ -56,7 +58,9 @@ describe('medicalDisclaimerProcessor', () => {
         content: 'IMPORTANT: You are a research assistant... RESEARCH PURPOSES ONLY ...',
       },
     ];
-    const result = medicalDisclaimerProcessor.processInput!(makeArgs(messages, existing));
+    const processInput = medicalDisclaimerProcessor.processInput;
+    expect(processInput).toBeDefined();
+    const result = processInput?.(makeArgs(messages, existing));
 
     const { systemMessages } = result as { systemMessages: Array<{ content: string }> };
     expect(systemMessages).toHaveLength(1);
@@ -65,7 +69,9 @@ describe('medicalDisclaimerProcessor', () => {
   it('preserves existing system messages when adding disclaimer', () => {
     const messages = [makeMessage('user', 'Help me research EDS')];
     const existing = [{ role: 'system' as const, content: 'You are Asklepios.' }];
-    const result = medicalDisclaimerProcessor.processInput!(makeArgs(messages, existing));
+    const processInput = medicalDisclaimerProcessor.processInput;
+    expect(processInput).toBeDefined();
+    const result = processInput?.(makeArgs(messages, existing));
 
     const { systemMessages } = result as { systemMessages: Array<{ content: string }> };
     expect(systemMessages).toHaveLength(2);
@@ -74,7 +80,9 @@ describe('medicalDisclaimerProcessor', () => {
 
   it('passes through messages unchanged', () => {
     const messages = [makeMessage('user', 'Patient has joint hypermobility')];
-    const result = medicalDisclaimerProcessor.processInput!(makeArgs(messages));
+    const processInput = medicalDisclaimerProcessor.processInput;
+    expect(processInput).toBeDefined();
+    const result = processInput?.(makeArgs(messages));
 
     const { messages: resultMessages } = result as { messages: MastraDBMessage[] };
     expect(resultMessages).toBe(messages);

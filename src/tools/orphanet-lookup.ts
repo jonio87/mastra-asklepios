@@ -26,19 +26,19 @@ export type OrphanetDisease = z.infer<typeof OrphanetDiseaseSchema>;
 
 const ORPHANET_API_BASE = 'https://api.orphacode.org';
 
-const OrphanetApiSearchSchema = z.object({
-  results: z
-    .array(
-      z.object({
-        // biome-ignore lint/style/useNamingConvention: Orphanet API field
-        ORPHAcode: z.number(),
-        'Preferred term': z.string().optional(),
-        // biome-ignore lint/style/useNamingConvention: Orphanet API field
-        Definition: z.string().optional(),
-      }),
-    )
-    .optional(),
+const OrphanetApiSearchItemSchema = z.object({
+  // biome-ignore lint/style/useNamingConvention: Orphanet API field
+  ORPHAcode: z.number(),
+  'Preferred term': z.string().optional(),
+  // biome-ignore lint/style/useNamingConvention: Orphanet API field
+  Definition: z.string().optional(),
 });
+
+/** Orphanet search API may return a plain array or `{ results: [...] }`. */
+const OrphanetApiSearchSchema = z.union([
+  z.array(OrphanetApiSearchItemSchema),
+  z.object({ results: z.array(OrphanetApiSearchItemSchema).optional() }),
+]);
 
 const OrphanetApiDetailSchema = z.object({
   // biome-ignore lint/style/useNamingConvention: Orphanet API field
@@ -53,6 +53,22 @@ const OrphanetApiDetailSchema = z.object({
   // biome-ignore lint/style/useNamingConvention: Orphanet API field
   Synonyms: z.array(z.string()).optional(),
 });
+
+const OrphanetGeneItemSchema = z.object({
+  // biome-ignore lint/style/useNamingConvention: Orphanet API field
+  Symbol: z.string().optional(),
+  // biome-ignore lint/style/useNamingConvention: Orphanet API field
+  Name: z.string().optional(),
+  'Gene symbol': z.string().optional(),
+  'Gene name': z.string().optional(),
+});
+
+const OrphanetApiGeneSchema = z
+  .object({
+    data: z.array(OrphanetGeneItemSchema).optional(),
+    // Alternative shapes — Orphanet gene endpoint may return top-level array or nested
+  })
+  .passthrough();
 
 export const orphanetLookupTool = createTool({
   id: 'orphanet-lookup',
@@ -99,26 +115,91 @@ export const orphanetLookupTool = createTool({
     }
 
     const data = OrphanetApiSearchSchema.safeParse(await response.json());
-    if (!(data.success && data.data.results)) {
+    if (!data.success) {
       logger.warn('Orphanet search returned no valid results', { query });
       return { diseases: [], query };
     }
 
-    const results = data.data.results.slice(0, maxResults);
+    // API may return a plain array or { results: [...] }
+    const items = Array.isArray(data.data) ? data.data : (data.data.results ?? []);
+    if (items.length === 0) {
+      logger.warn('Orphanet search returned empty results', { query });
+      return { diseases: [], query };
+    }
 
-    const diseases: OrphanetDisease[] = results.map((r) => ({
-      orphaNumber: r.ORPHAcode,
-      name: r['Preferred term'] ?? 'Unknown',
-      definition: r.Definition ?? 'No definition available',
-      genes: [],
-      synonyms: [],
-      url: `https://www.orpha.net/en/disease/detail/${r.ORPHAcode}`,
-    }));
+    const results = items.slice(0, maxResults);
+
+    const diseases: OrphanetDisease[] = await Promise.all(
+      results.map(async (r) => {
+        const genes = await fetchGenes(r.ORPHAcode);
+        return {
+          orphaNumber: r.ORPHAcode,
+          name: r['Preferred term'] ?? 'Unknown',
+          definition: r.Definition ?? 'No definition available',
+          genes,
+          synonyms: [],
+          url: `https://www.orpha.net/en/disease/detail/${r.ORPHAcode}`,
+        };
+      }),
+    );
 
     logger.info('Orphanet search complete', { query, resultCount: diseases.length });
     return { diseases, query };
   },
 });
+
+/** Extract gene symbol/name from a single Orphanet gene record. */
+function extractGeneFields(item: unknown): { symbol: string; name: string } | undefined {
+  if (typeof item !== 'object' || item === null) return undefined;
+  const record = item as Record<string, unknown>;
+  const symbol =
+    (typeof record['Symbol'] === 'string' ? record['Symbol'] : undefined) ??
+    (typeof record['Gene symbol'] === 'string' ? record['Gene symbol'] : undefined);
+  const name =
+    (typeof record['Name'] === 'string' ? record['Name'] : undefined) ??
+    (typeof record['Gene name'] === 'string' ? record['Gene name'] : undefined);
+  return symbol ? { symbol, name: name ?? symbol } : undefined;
+}
+
+/** Normalize the various Orphanet gene API response shapes into an array. */
+function normalizeGeneItems(raw: unknown): unknown[] {
+  if (Array.isArray(raw)) return raw;
+  const parsed = OrphanetApiGeneSchema.safeParse(raw);
+  return parsed.success ? (parsed.data.data ?? []) : [];
+}
+
+async function fetchGenes(orphaCode: number): Promise<Array<{ symbol: string; name: string }>> {
+  const url = `${ORPHANET_API_BASE}/EN/ClinicalEntity/orphacode/${orphaCode}/Gene`;
+  try {
+    const response = await fetch(url, {
+      headers: { accept: 'application/json', apiKey: 'GUEST' },
+    });
+
+    if (!response.ok) {
+      logger.debug('Orphanet gene fetch returned non-OK', {
+        orphaCode,
+        status: response.status,
+      });
+      return [];
+    }
+
+    const raw: unknown = await response.json();
+    const items = normalizeGeneItems(raw);
+    const genes = items.map(extractGeneFields).filter(Boolean) as Array<{
+      symbol: string;
+      name: string;
+    }>;
+
+    logger.debug('Orphanet gene fetch complete', {
+      orphaCode,
+      geneCount: genes.length,
+    });
+    return genes;
+  } catch {
+    logger.debug('Orphanet gene fetch error', { orphaCode });
+    return [];
+  }
+}
 
 async function fetchOrphanetDisease(orphaCode: number): Promise<OrphanetDisease | undefined> {
   const url = `${ORPHANET_API_BASE}/EN/ClinicalEntity/orphacode/${orphaCode}`;
@@ -138,13 +219,15 @@ async function fetchOrphanetDisease(orphaCode: number): Promise<OrphanetDisease 
   }
 
   const data = parsed.data;
+  const genes = await fetchGenes(data.ORPHAcode);
+
   return {
     orphaNumber: data.ORPHAcode,
     name: data['Preferred term'] ?? 'Unknown',
     definition: data.Definition ?? 'No definition available',
     ageOfOnset: data.AverageAgeOfOnset?.join(', '),
     inheritanceMode: data.TypeOfInheritance?.join(', '),
-    genes: [],
+    genes,
     synonyms: data.Synonyms ?? [],
     url: `https://www.orpha.net/en/disease/detail/${data.ORPHAcode}`,
   };

@@ -80,6 +80,34 @@ describe('diagnosticResearchWorkflow', () => {
     expect(result.success).toBe(true);
   });
 
+  describe('HITL review step', () => {
+    it('registers review-findings step', () => {
+      const steps = diagnosticResearchWorkflow.steps;
+      expect(steps).toHaveProperty('review-findings');
+    });
+
+    it('includes review step between parallel-research and generate-hypotheses', () => {
+      const stepIds = Object.keys(diagnosticResearchWorkflow.steps);
+      const parallelIndex = stepIds.indexOf('parallel-research');
+      const reviewIndex = stepIds.indexOf('review-findings');
+      const hypothesesIndex = stepIds.indexOf('generate-hypotheses');
+
+      expect(parallelIndex).toBeGreaterThanOrEqual(0);
+      expect(reviewIndex).toBeGreaterThanOrEqual(0);
+      expect(hypothesesIndex).toBeGreaterThanOrEqual(0);
+      expect(reviewIndex).toBeGreaterThan(parallelIndex);
+      expect(hypothesesIndex).toBeGreaterThan(reviewIndex);
+    });
+
+    it('has all 4 workflow steps registered', () => {
+      const stepIds = Object.keys(diagnosticResearchWorkflow.steps);
+      expect(stepIds).toContain('build-research-queries');
+      expect(stepIds).toContain('parallel-research');
+      expect(stepIds).toContain('review-findings');
+      expect(stepIds).toContain('generate-hypotheses');
+    });
+  });
+
   it('validates confidence range 0-100', () => {
     const valid = diagnosticResearchWorkflow.outputSchema.safeParse({
       patientId: 'test',

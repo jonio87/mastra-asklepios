@@ -291,11 +291,21 @@ function mapLabFlag(flag?: string): 'normal' | 'high' | 'low' | 'critical' | 'un
 }
 
 function extractDemographics(text: string): { age?: string; sex?: string } {
-  const ageMatch = /(\d{1,3})\s*(?:year|yr|y\.?o\.?)\s*(?:old)?/i.exec(text);
-  const sexMatch = /\b(male|female|M|F)\b/i.exec(text);
+  // Match "28 year old", "28yr", "28y.o.", or shorthand "28F", "28M"
+  // Require word boundary or demographic context to avoid "for 3 years"
+  const ageMatch =
+    /(?:age|aged|patient)[:\s]+(\d{1,3})\s*(?:year|yr|y\.?o\.?)?\s*(?:old)?/i.exec(text) ??
+    /\b(\d{1,3})\s*(?:year|yr|y\.?o\.?)\s*old\b/i.exec(text) ??
+    /\b(\d{1,3})\s*[MF]\b/.exec(text);
+  const sexMatch = /\b(male|female)\b/i.exec(text) ?? /(\d{1,3})\s*(M|F)\b/.exec(text);
 
   const result: { age?: string; sex?: string } = {};
   if (ageMatch?.[1]) result.age = `${ageMatch[1]} years`;
-  if (sexMatch?.[1]) result.sex = sexMatch[1].toLowerCase().startsWith('m') ? 'male' : 'female';
+
+  if (sexMatch) {
+    // "male"/"female" in group 1, or "M"/"F" in group 2 from "28M"/"28F" pattern
+    const sexToken = sexMatch[2] ?? sexMatch[1] ?? '';
+    result.sex = sexToken.toLowerCase().startsWith('m') ? 'male' : 'female';
+  }
   return result;
 }

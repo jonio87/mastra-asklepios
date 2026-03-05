@@ -29,6 +29,12 @@ describe('mastra instance', () => {
     expect(agent.name).toBe('Synthesis Agent');
   });
 
+  it('has brain agent registered', () => {
+    const agent = mastra.getAgent('asklepios-brain');
+    expect(agent).toBeDefined();
+    expect(agent.name).toBe('Asklepios Brain');
+  });
+
   it('has patient-intake workflow registered', () => {
     const workflow = mastra.getWorkflow('patient-intake');
     expect(workflow).toBeDefined();

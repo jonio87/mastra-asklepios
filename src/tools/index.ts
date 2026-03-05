@@ -1,3 +1,5 @@
+export { brainFeedTool } from './brain-feed.js';
+export { brainRecallTool } from './brain-recall.js';
 export { deepResearchTool } from './deep-research.js';
 export { documentParserTool } from './document-parser.js';
 export { hpoMapperTool } from './hpo-mapper.js';

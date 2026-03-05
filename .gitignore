@@ -44,3 +44,5 @@ CLAUDE.personal.md
 # Logs
 *.log
 npm-debug.log*
+.omc/
+logs/

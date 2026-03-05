@@ -3,7 +3,7 @@ import { memory } from '../memory.js';
 import { deepResearchTool } from '../tools/deep-research.js';
 import { orphanetLookupTool } from '../tools/orphanet-lookup.js';
 import { pubmedSearchTool } from '../tools/pubmed-search.js';
-import { anthropic } from '../utils/anthropic-provider.js';
+import { modelRouter } from '../utils/model-router.js';
 
 export const researchAgent = new Agent({
   id: 'research-agent',
@@ -37,7 +37,7 @@ Your primary role is to conduct thorough literature searches and gather evidence
 - Present findings objectively without making definitive diagnoses
 - Always acknowledge uncertainty and evidence gaps
 - Recommend further investigation when evidence is insufficient`,
-  model: anthropic('claude-sonnet-4-20250514'),
+  model: modelRouter,
   tools: {
     pubmedSearch: pubmedSearchTool,
     orphanetLookup: orphanetLookupTool,

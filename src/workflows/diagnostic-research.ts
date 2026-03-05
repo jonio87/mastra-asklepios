@@ -1,4 +1,4 @@
-import { Workflow } from '@mastra/core/workflows';
+import { createStep, Workflow } from '@mastra/core/workflows';
 import { z } from 'zod';
 import { deepResearchTool } from '../tools/deep-research.js';
 import { orphanetLookupTool } from '../tools/orphanet-lookup.js';
@@ -41,6 +41,87 @@ const DiagnosticResearchOutput = z.object({
   knowledgeGaps: z.array(z.string()),
   suggestedFollowUp: z.array(z.string()),
   timestamp: z.string(),
+});
+
+/**
+ * HITL review step: suspends workflow to present research findings for human review
+ * before generating diagnostic hypotheses. Reviewer can filter irrelevant findings
+ * and guide the hypothesis generation.
+ */
+const FindingsReviewSuspendSchema = z.object({
+  patientId: z.string(),
+  findingsCount: z.number(),
+  topFindings: z.array(
+    z.object({
+      index: z.number(),
+      source: z.string(),
+      title: z.string(),
+      relevance: z.number(),
+    }),
+  ),
+  message: z.string(),
+});
+
+const FindingsReviewResumeSchema = z.object({
+  approvedFindingIndices: z
+    .array(z.number())
+    .describe('Indices of approved findings to use for hypothesis generation (0-based)'),
+  additionalContext: z
+    .string()
+    .optional()
+    .describe('Additional clinical context for hypothesis generation'),
+  notes: z.string().optional().describe('Reviewer notes'),
+});
+
+const FindingsReviewInputSchema = z.object({
+  allFindings: z.array(ResearchFindingSchema),
+  patientId: z.string(),
+  symptoms: z.array(z.string()),
+});
+
+const reviewFindingsStep = createStep({
+  id: 'review-findings',
+  description:
+    'Suspends for human review of research findings before hypothesis generation. Reviewer can approve/reject findings and add clinical context.',
+  inputSchema: FindingsReviewInputSchema,
+  outputSchema: FindingsReviewInputSchema,
+  suspendSchema: FindingsReviewSuspendSchema,
+  resumeSchema: FindingsReviewResumeSchema,
+  execute: async ({ inputData, suspend, resumeData }) => {
+    if (!resumeData) {
+      const hasSignificantFindings = inputData.allFindings.length > 0;
+
+      if (hasSignificantFindings) {
+        return suspend(
+          {
+            patientId: inputData.patientId,
+            findingsCount: inputData.allFindings.length,
+            topFindings: inputData.allFindings.slice(0, 15).map((f, i) => ({
+              index: i,
+              source: f.source,
+              title: f.title,
+              relevance: f.relevance,
+            })),
+            message: `${inputData.allFindings.length} research finding(s) collected from PubMed, Orphanet, and deep research. Please review before hypothesis generation.`,
+          },
+          { resumeLabel: 'findings-review' },
+        );
+      }
+
+      return inputData;
+    }
+
+    const approvedFindings = resumeData.approvedFindingIndices
+      .filter((i) => i >= 0 && i < inputData.allFindings.length)
+      .map((i) => inputData.allFindings[i])
+      .filter((f): f is NonNullable<typeof f> => f != null);
+
+    return {
+      allFindings: approvedFindings.length > 0 ? approvedFindings : inputData.allFindings,
+      patientId: inputData.patientId,
+      symptoms: inputData.symptoms,
+    };
+  },
 });
 
 export const diagnosticResearchWorkflow = new Workflow({
@@ -213,6 +294,7 @@ export const diagnosticResearchWorkflow = new Workflow({
       };
     },
   })
+  .then(reviewFindingsStep)
   .then({
     id: 'generate-hypotheses',
     description: 'Generate ranked diagnostic hypotheses from research findings',

@@ -39,7 +39,8 @@ describe('documentParserTool', () => {
 });
 
 describe('documentParserTool.execute', () => {
-  const execute = documentParserTool.execute!;
+  const execute = documentParserTool.execute;
+  if (!execute) throw new Error('documentParserTool.execute is undefined');
 
   it('parses a simple clinical note', async () => {
     const text =

@@ -1,6 +1,6 @@
 import { Mastra } from '@mastra/core';
-
 import { asklepiosAgent } from './agents/asklepios.js';
+import { brainAgent } from './agents/brain-agent.js';
 import { phenotypeAgent } from './agents/phenotype-agent.js';
 import { researchAgent } from './agents/research-agent.js';
 import { synthesisAgent } from './agents/synthesis-agent.js';
@@ -10,6 +10,7 @@ import {
   medicalDisclaimerProcessor,
   piiRedactorProcessor,
 } from './processors/index.js';
+import { StderrLogger } from './utils/stderr-logger.js';
 import { diagnosticResearchWorkflow } from './workflows/diagnostic-research.js';
 import { patientIntakeWorkflow } from './workflows/patient-intake.js';
 
@@ -21,9 +22,13 @@ import { patientIntakeWorkflow } from './workflows/patient-intake.js';
  * - `mastra.getAgent('asklepios')` → programmatic access
  * - `mastra.getWorkflow('patient-intake')` → workflow execution
  */
+const logLevel = (process.env['LOG_LEVEL'] ?? 'info') as 'debug' | 'info' | 'warn' | 'error';
+
 export const mastra = new Mastra({
+  logger: new StderrLogger({ name: 'asklepios', level: logLevel }),
   agents: {
     asklepios: asklepiosAgent,
+    'asklepios-brain': brainAgent,
     researchAgent,
     phenotypeAgent,
     synthesisAgent,

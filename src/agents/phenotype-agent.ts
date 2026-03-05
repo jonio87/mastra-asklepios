@@ -2,7 +2,7 @@ import { Agent } from '@mastra/core/agent';
 import { memory } from '../memory.js';
 import { documentParserTool } from '../tools/document-parser.js';
 import { hpoMapperTool } from '../tools/hpo-mapper.js';
-import { anthropic } from '../utils/anthropic-provider.js';
+import { modelRouter } from '../utils/model-router.js';
 
 export const phenotypeAgent = new Agent({
   id: 'phenotype-agent',
@@ -36,7 +36,7 @@ Your primary role is to extract symptoms from patient descriptions and medical d
 ## Output Format
 
 Present mappings organized by organ system with HPO IDs, original text, confidence scores, and any relevant notes about the clinical significance of specific phenotype combinations.`,
-  model: anthropic('claude-sonnet-4-20250514'),
+  model: modelRouter,
   tools: {
     hpoMapper: hpoMapperTool,
     documentParser: documentParserTool,

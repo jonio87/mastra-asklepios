@@ -1,6 +1,6 @@
 import { Agent } from '@mastra/core/agent';
 import { memory } from '../memory.js';
-import { anthropic } from '../utils/anthropic-provider.js';
+import { modelRouter } from '../utils/model-router.js';
 
 export const synthesisAgent = new Agent({
   id: 'synthesis-agent',
@@ -62,6 +62,6 @@ For each hypothesis, provide:
 - Include the reasoning chain so a clinician can evaluate your logic
 - When evidence is conflicting, present both sides
 - Flag when the presentation could represent a novel or uncharacterized condition`,
-  model: anthropic('claude-sonnet-4-20250514'),
+  model: modelRouter,
   tools: {},
 });

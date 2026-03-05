@@ -101,3 +101,15 @@ Don't read these upfront — load them when relevant to your current task:
 
 <!-- Format: [date] [context] insight -->
 <!-- Example: [2026-03-01] Zod .transform() is better than manual mapping for DB rows -->
+- [2026-03-05] [Mastra agent.stream()] Default maxSteps is 5, too low for complex diagnostic workflows with 6-8 tool calls. Set maxSteps: 10 explicitly.
+- [2026-03-05] [Mastra ConsoleLogger] Framework logs go to stdout by default, polluting CLI output. Extend with StderrLogger to redirect to stderr.
+- [2026-03-05] [Orphanet API] API returns raw array `[...]` at top level, NOT `{ results: [...] }`. Use union schema to handle both formats.
+- [2026-03-05] [CLI readline] Piped input fires all `line` events synchronously before async handlers complete. Add isProcessing mutex to prevent race conditions.
+- [2026-03-05] [AI SDK v5] Token usage fields are `inputTokens`/`outputTokens` (not `promptTokens`/`completionTokens` from v4). Normalize both in observability.
+- [2026-03-05] [MCP testing] McpServer internal maps accessible via `(server as any)._registeredTools` for registration tests. Not a Map — plain object with bracket notation.
+- [2026-03-05] [Working memory] Resource-scoped working memory persists across thread boundaries. New thread with same patient resource gets full PatientProfile instantly (~11K tokens, 13s).
+- [2026-03-05] [Network mode] Routing agent correctly identifies pure reasoning tasks and delegates to synthesis-agent without unnecessary tool calls. Single-iteration routing for simple requests.
+- [2026-03-05] [Brain memory] brainFeed ingests anonymized case summaries; brainRecall returns 0 patterns initially — brain accumulates value over 50+ cases, not from day one.
+- [2026-03-05] [@mastra/observability] Package requires @mastra/core >=0.18.1-0 <0.25.0-0 but project uses @mastra/core@1.9.0. Use lightweight custom tracing instead.
+- [2026-03-05] [Mastra Workflow API] workflow.execute() is internal; use workflow.createRun() → run.start({ inputData }) for external invocation (MCP tools).
+- [2026-03-05] [Document parser] Regex-based extraction has limits: "28F" compact format needed special handling; medication extraction captures compound strings. NLP would improve accuracy.
