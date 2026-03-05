@@ -1,6 +1,6 @@
 import { LibSQLStore, LibSQLVector } from '@mastra/libsql';
 import { Memory } from '@mastra/memory';
-import { patientProfileSchema } from './schemas/patient-profile.js';
+import { clinicalDashboardSchema } from './schemas/clinical-dashboard.js';
 import { anthropic } from './utils/anthropic-provider.js';
 
 const dbUrl = process.env['ASKLEPIOS_DB_URL'] ?? 'file:asklepios.db';
@@ -62,19 +62,26 @@ export const memory = new Memory({
       scope: 'resource',
       observation: {
         messageTokens: 20_000,
-        instruction:
-          'Focus on: patient symptoms, phenotype patterns, diagnostic hypotheses, evidence quality, successful and failed research paths, rare disease patterns, and cross-patient insights. Prioritize observations that would help diagnose future patients with similar presentations.',
+        instruction: `Focus on: diagnostic REASONING paths (why the agent considered/rejected hypotheses), patient communication patterns (questions asked, emotional context, concerns expressed), clinical decision-making (what triggered research, what changed confidence levels), and conversation dynamics (what information the patient volunteered vs was asked for).
+
+DO NOT repeat lab values, medication lists, treatment trial details, or structured clinical data — these are stored in Layer 2 (clinical record database) and queryable via tools. Instead, capture the REASONING and CONTEXT around that data: why a lab trend was concerning, how a treatment failure changed the diagnostic direction, what the patient's reaction was to findings.`,
       },
       reflection: {
         observationTokens: 40_000,
-        instruction:
-          'Consolidate observations across patient cases. Highlight recurring patterns, commonly misdiagnosed conditions, diagnostic shortcuts, and key differentiating features between similar rare diseases. Remove redundancies while preserving unique insights.',
+        instruction: `Consolidate diagnostic reasoning patterns across conversations. Structure as:
+1. REASONING CHAINS — how hypotheses evolved and why
+2. COMMUNICATION INSIGHTS — what questions yielded the most diagnostic information
+3. DECISION PATTERNS — what evidence triggered hypothesis changes
+4. PATIENT CONTEXT — emotional state, goals, concerns that affect clinical decisions
+5. MISSED OPPORTUNITIES — questions not asked, tests not suggested, patterns not noticed early
+
+Remove redundancies. DO NOT include structured clinical data (labs, meds, consultations) — that's in Layer 2.`,
       },
     },
     workingMemory: {
       enabled: true,
       scope: 'resource',
-      schema: patientProfileSchema,
+      schema: clinicalDashboardSchema,
     },
   },
 });

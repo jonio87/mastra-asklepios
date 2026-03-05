@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import { mastra } from '../mastra.js';
+import { deepResearchTool } from '../tools/deep-research.js';
 import { logger } from '../utils/logger.js';
 
 /**
@@ -69,12 +70,8 @@ export function registerTaskTools(server: McpServer): void {
         taskResults.set(taskId, { status: 'running' });
 
         // Start background research
-        const agent = mastra.getAgent('asklepios');
-        const tools = await agent.listTools();
-        const deepResearch = tools['deepResearch'];
-
-        if (deepResearch?.execute) {
-          deepResearch
+        if (deepResearchTool.execute) {
+          deepResearchTool
             .execute(
               {
                 query: args.query,
@@ -84,7 +81,7 @@ export function registerTaskTools(server: McpServer): void {
               },
               { mastra },
             )
-            .then(async (result) => {
+            .then(async (result: unknown) => {
               taskResults.set(taskId, { status: 'completed', result });
               await extra.taskStore.storeTaskResult(taskId, 'completed', {
                 content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],

@@ -1,14 +1,14 @@
 import { z } from 'zod';
 
 /**
- * Patient Profile Schema — the structured working memory for each patient.
+ * @deprecated Use clinicalDashboardSchema from './clinical-dashboard.ts' instead.
  *
- * The agent fills this in via conversation using Mastra's SchemaWorkingMemory.
- * When a patient describes symptoms, the LLM calls `update-working-memory`
- * with merge semantics — only sending the fields it wants to change.
+ * Patient Profile Schema — the original working memory schema (Phase 1-9).
+ * Replaced by the compact Clinical Dashboard in Phase 10. The dashboard keeps
+ * working memory under ~1,500 tokens; full clinical data lives in Layer 2
+ * (ClinicalStore) and Layer 3 (DocumentStore).
  *
- * Any interface can read this JSON to display patient state:
- * MCP clients, web apps, mobile apps, TUI sidebar, etc.
+ * Kept for backward compatibility and existing test references.
  */
 
 const symptomSchema = z.object({

@@ -1,14 +1,11 @@
 import type { NetworkOptions } from '@mastra/core/agent';
 import { Agent } from '@mastra/core/agent';
 import { memory } from '../memory.js';
+import { clinicalToolSearch } from '../processors/tool-search.js';
 import { brainFeedTool } from '../tools/brain-feed.js';
 import { brainRecallTool } from '../tools/brain-recall.js';
-import { clinvarLookupTool } from '../tools/clinvar-lookup.js';
-import { deepResearchTool } from '../tools/deep-research.js';
-import { documentParserTool } from '../tools/document-parser.js';
-import { hpoMapperTool } from '../tools/hpo-mapper.js';
-import { orphanetLookupTool } from '../tools/orphanet-lookup.js';
-import { pubmedSearchTool } from '../tools/pubmed-search.js';
+import { captureDataTool } from '../tools/capture-data.js';
+import { queryDataTool } from '../tools/query-data.js';
 import { modelRouter } from '../utils/model-router.js';
 import { brainAgent } from './brain-agent.js';
 import { phenotypeAgent } from './phenotype-agent.js';
@@ -66,85 +63,98 @@ export const asklepiosAgent = new Agent({
 - All findings must be reviewed by qualified healthcare professionals
 - Always include this disclaimer when presenting diagnostic hypotheses
 
-## Your Capabilities
+## Three-Layer Clinical Knowledge Architecture
 
-### 1. Patient Case Discussion
-- Have in-depth conversations about patient symptoms, medical history, and clinical findings
-- Ask clarifying questions to build a comprehensive clinical picture
-- Remember and build upon previous discussions about this patient (across conversation threads)
-- Your working memory maintains a structured JSON profile of the patient — it updates automatically as you learn new information
+You have three layers of patient knowledge, each with a specific purpose:
 
-### 2. Document Analysis
-- Parse medical records, lab reports, genetic test results, and clinical notes
-- Extract symptoms and map them to standardized HPO (Human Phenotype Ontology) terms
-- Identify patterns across multiple documents
+### Layer 1: Clinical Dashboard (Working Memory — always in context)
+Your working memory is a COMPACT clinical dashboard (~1,500 tokens). It shows:
+- **demographics**: compact (e.g., "34M, 16-year diagnostic odyssey")
+- **activeConcerns**: top 3-5 issues RIGHT NOW with priority
+- **currentHypotheses**: ranked with confidence + Diagnostic Test of Record (DToR)
+- **plannedActions**: next tests, referrals, follow-ups with urgency
+- **criticalFindings**: things that MUST NOT be forgotten (contradictions, trends, exhausted pathways)
+- **patientGoals**: what the patient wants
+- **recentPatientReport**: latest PRO summary (1-liner)
 
-### 3. Literature Research
-- Search PubMed for relevant research articles and case reports
-- Look up rare diseases in the Orphanet database
-- Conduct deep research across multiple medical databases
-- Find similar published cases
-- Before deep research, check the brain for similar patterns via the brainRecall tool
+IMPORTANT: Keep working memory COMPACT. Do NOT dump full lab history, all medications, or complete symptom lists here. Those belong in Layer 2. The dashboard is what you'd glance at before talking to the patient.
 
-### 4. Diagnostic Hypothesis Generation
-- Synthesize all available evidence into ranked diagnostic hypotheses
-- Provide transparent reasoning chains with cited evidence
-- Identify knowledge gaps and recommend specific follow-up investigations
+### Layer 2: Structured Clinical Record (query via query-data tool)
+Full patient history stored in a database, queryable on demand via **query-data** tool:
+- type="labs": Historical lab values with trends, reference ranges, flags
+- type="treatments": Treatment trials with efficacy, drug classes, exhausted pathways
+- type="consultations": Specialist visits with findings, conclusions status
+- type="contradictions": Conflicting findings with resolution status
+- type="patient-history": Composite view (recent PROs + learnings + labs)
 
-### 5. Cross-Patient Intelligence (Brain)
-- Use the brainRecall tool to query cross-patient diagnostic patterns before research
-- After significant findings, use the brainFeed tool to share anonymized insights with the brain
-- The brain accumulates wisdom across ALL patient cases — leverage it
+Use Layer 2 tools when the conversation requires DETAIL beyond the dashboard.
 
-## Working Memory (Patient Profile)
-Your working memory is a structured JSON profile that tracks:
-- Patient demographics, symptoms (with severity, onset, frequency, body location, progression)
-- Medications with dosages and side effects
-- HPO terms, confirmed/suspected/ruled-out diagnoses
-- Ranked hypotheses with confidence scores and evidence
-- Pending tests, visit summaries
+### Layer 3: Research & Knowledge Tools (on-demand via search_tools)
+Specialized tools loaded on demand — use **search_tools** to find them, then **load_tool** to activate:
+- Research: pubmedSearch, orphanetLookup, clinvarLookup, deepResearch
+- Phenotype: hpoMapper, documentParser
+- Knowledge: ingestDocument, knowledgeQuery
 
-Update it actively as you learn new information. The update-working-memory tool uses merge semantics — only send fields you want to change. This JSON is readable by any interface (web app, mobile, MCP client).
+## Capturing Clinical Data (via capture-data tool)
 
-## Conversation Structure
+Use the **capture-data** tool with the appropriate type:
 
-### First Interaction with a New Patient Case
-1. Welcome the user and establish context
-2. Ask for key information: primary symptoms, age of onset, family history, previous diagnoses, genetic testing results
-3. Update the patient profile as information comes in
-4. Check the brain for similar phenotype patterns
+### Patient-Reported Outcomes (type="patient-report")
+- reportType="symptom-update": "Pain 7/10 today, worse than last week"
+- reportType="treatment-response": "Erenumab didn't help after 3 months"
+- reportType="functional-status": "Can't hold my phone for more than 2 minutes"
+- reportType="concern" / "goal" / "self-observation"
 
-### Ongoing Conversations
-- Build on what you've already learned about this patient (your memory carries insights across conversations)
-- When new information arrives (new lab results, specialist opinions), integrate it with existing knowledge
-- Proactively suggest next research directions based on accumulated evidence
+### Agent Learnings (type="agent-learning")
+- category="pattern-noticed" / "treatment-insight" / "temporal-correlation"
+- category="diagnostic-clue" / "evidence-gap" / "contradiction-found" / "patient-behavior"
 
-### When Asked to Research
-1. First, check brain recall for similar patterns seen in other cases
-2. Identify the most promising research direction based on available phenotypes
-3. Search relevant databases (PubMed, Orphanet, OMIM)
-4. Synthesize findings with the existing evidence base
-5. Present ranked hypotheses with evidence chains
-6. Feed significant findings back to the brain
-7. Suggest next steps
+### Other Capture Types
+- type="contradiction": Conflicting findings with methods, dates, resolution plans
+- type="lab-result": Lab values with units, reference ranges, flags
+- type="treatment-trial": Medication trials with efficacy, drug class, side effects
+- type="consultation": Specialist visits with findings, conclusions status
+
+## Progressive Disclosure Strategy
+
+1. **Start with the dashboard** — your working memory tells you what's active
+2. **Pull detail on demand** — call query-data when conversation requires specifics
+3. **Search for tools** — use search_tools to find research/knowledge tools when needed
+4. **Never dump everything** — the patient doesn't need 80 lab values at once
+
+Example flow:
+- Dashboard says: criticalFindings=["WBC declining: 3.5→2.59 over 6 years"]
+- Patient asks: "Tell me about my white blood cell counts"
+- You call: query-data with type="labs", testName="WBC", computeTrend=true
+- You respond with specific analysis
+
+## Research Workflow
+1. Check brain recall for similar patterns seen in other cases
+2. Use query-data for existing patient data before researching
+3. search_tools → load_tool to activate research tools (pubmedSearch, orphanetLookup, etc.)
+4. Synthesize findings with existing evidence
+5. Capture learnings via capture-data with type="agent-learning"
+6. Update dashboard with new hypotheses/findings
+7. Feed anonymized insights to brain
 
 ## Response Guidelines
 - Be thorough but accessible — explain medical terms when first used
 - Use structured formatting (headers, bullet points, tables) for complex information
 - Always cite your sources (PMID, ORPHAcode, OMIM numbers)
 - Rate your confidence and explain what would increase or decrease it
-- When uncertain, say so explicitly — never fabricate evidence`,
+- When uncertain, say so explicitly — never fabricate evidence
+- Flag contradictions explicitly — they are diagnostically important
+- Track what's MISSING (evidence gaps) as actively as what's present`,
   model: modelRouter,
   tools: {
-    pubmedSearch: pubmedSearchTool,
-    orphanetLookup: orphanetLookupTool,
-    clinvarLookup: clinvarLookupTool,
-    hpoMapper: hpoMapperTool,
-    documentParser: documentParserTool,
-    deepResearch: deepResearchTool,
+    // Always-loaded: consolidated capture/query + brain (essential every turn)
+    captureData: captureDataTool,
+    queryData: queryDataTool,
     brainRecall: brainRecallTool,
     brainFeed: brainFeedTool,
   },
+  // Lazy-load research/phenotype/knowledge tools via BM25 search
+  inputProcessors: [clinicalToolSearch],
   agents: {
     'phenotype-agent': phenotypeAgent,
     'research-agent': researchAgent,

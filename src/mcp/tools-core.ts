@@ -2,6 +2,11 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import { mastra } from '../mastra.js';
+import { brainRecallTool } from '../tools/brain-recall.js';
+import { clinvarLookupTool } from '../tools/clinvar-lookup.js';
+import { hpoMapperTool } from '../tools/hpo-mapper.js';
+import { orphanetLookupTool } from '../tools/orphanet-lookup.js';
+import { pubmedSearchTool } from '../tools/pubmed-search.js';
 
 /**
  * Core tools — the original 5 Asklepios MCP tools.
@@ -68,17 +73,16 @@ export function registerCoreTools(server: McpServer): void {
       annotations: { readOnlyHint: true },
     },
     async ({ query, maxResults }) => {
-      const agent = mastra.getAgent('asklepios');
-      const tools = await agent.listTools();
-      const pubmed = tools['pubmedSearch'];
-      if (!pubmed?.execute) {
+      if (!pubmedSearchTool.execute) {
         return {
           content: [{ type: 'text' as const, text: 'PubMed search tool not available' }],
           isError: true,
         };
       }
-
-      const result = await pubmed.execute({ query, maxResults: maxResults ?? 10 }, { mastra });
+      const result = await pubmedSearchTool.execute(
+        { query, maxResults: maxResults ?? 10 },
+        { mastra },
+      );
 
       return {
         content: [
@@ -112,17 +116,13 @@ export function registerCoreTools(server: McpServer): void {
       annotations: { readOnlyHint: true },
     },
     async ({ query, orphaCode, maxResults }) => {
-      const agent = mastra.getAgent('asklepios');
-      const tools = await agent.listTools();
-      const orphanet = tools['orphanetLookup'];
-      if (!orphanet?.execute) {
+      if (!orphanetLookupTool.execute) {
         return {
           content: [{ type: 'text' as const, text: 'Orphanet lookup tool not available' }],
           isError: true,
         };
       }
-
-      const result = await orphanet.execute(
+      const result = await orphanetLookupTool.execute(
         { query, orphaCode, maxResults: maxResults ?? 5 },
         { mastra },
       );
@@ -163,17 +163,13 @@ export function registerCoreTools(server: McpServer): void {
       annotations: { readOnlyHint: true },
     },
     async ({ query, gene, variant, maxResults }) => {
-      const agent = mastra.getAgent('asklepios');
-      const tools = await agent.listTools();
-      const clinvar = tools['clinvarLookup'];
-      if (!clinvar?.execute) {
+      if (!clinvarLookupTool.execute) {
         return {
           content: [{ type: 'text' as const, text: 'ClinVar lookup tool not available' }],
           isError: true,
         };
       }
-
-      const result = await clinvar.execute(
+      const result = await clinvarLookupTool.execute(
         {
           ...(query !== undefined ? { query } : {}),
           ...(gene !== undefined ? { gene } : {}),
@@ -209,17 +205,13 @@ export function registerCoreTools(server: McpServer): void {
       annotations: { readOnlyHint: true },
     },
     async ({ symptoms }) => {
-      const agent = mastra.getAgent('asklepios');
-      const tools = await agent.listTools();
-      const hpoMapper = tools['hpoMapper'];
-      if (!hpoMapper?.execute) {
+      if (!hpoMapperTool.execute) {
         return {
           content: [{ type: 'text' as const, text: 'HPO mapper tool not available' }],
           isError: true,
         };
       }
-
-      const result = await hpoMapper.execute({ symptoms }, { mastra });
+      const result = await hpoMapperTool.execute({ symptoms }, { mastra });
 
       return {
         content: [
@@ -249,17 +241,16 @@ export function registerCoreTools(server: McpServer): void {
       annotations: { readOnlyHint: true },
     },
     async ({ symptoms, hpoTerms }) => {
-      const agent = mastra.getAgent('asklepios');
-      const tools = await agent.listTools();
-      const brainRecall = tools['brainRecall'];
-      if (!brainRecall?.execute) {
+      if (!brainRecallTool.execute) {
         return {
           content: [{ type: 'text' as const, text: 'Brain recall tool not available' }],
           isError: true,
         };
       }
-
-      const result = await brainRecall.execute({ symptoms, hpoTerms: hpoTerms ?? [] }, { mastra });
+      const result = await brainRecallTool.execute(
+        { symptoms, hpoTerms: hpoTerms ?? [] },
+        { mastra },
+      );
 
       return {
         content: [

@@ -3,6 +3,8 @@ import { z } from 'zod';
 
 import { mastra } from '../mastra.js';
 import { storage } from '../memory.js';
+import { deepResearchTool } from '../tools/deep-research.js';
+import { documentParserTool } from '../tools/document-parser.js';
 
 /**
  * State inspection + raw tool access — verification layer for AI testers.
@@ -198,17 +200,13 @@ export function registerStateTools(server: McpServer): void {
       annotations: { readOnlyHint: true },
     },
     async ({ text, documentType }) => {
-      const agent = mastra.getAgent('asklepios');
-      const tools = await agent.listTools();
-      const parser = tools['documentParser'];
-      if (!parser?.execute) {
+      if (!documentParserTool.execute) {
         return {
           content: [{ type: 'text' as const, text: 'Document parser tool not available' }],
           isError: true,
         };
       }
-
-      const result = await parser.execute({ text, documentType }, { mastra });
+      const result = await documentParserTool.execute({ text, documentType }, { mastra });
 
       return {
         content: [
@@ -243,17 +241,16 @@ export function registerStateTools(server: McpServer): void {
       annotations: { readOnlyHint: true },
     },
     async ({ query, context, focusAreas, maxSources }) => {
-      const agent = mastra.getAgent('asklepios');
-      const tools = await agent.listTools();
-      const research = tools['deepResearch'];
-      if (!research?.execute) {
+      if (!deepResearchTool.execute) {
         return {
           content: [{ type: 'text' as const, text: 'Deep research tool not available' }],
           isError: true,
         };
       }
-
-      const result = await research.execute({ query, context, focusAreas, maxSources }, { mastra });
+      const result = await deepResearchTool.execute(
+        { query, context, focusAreas, maxSources },
+        { mastra },
+      );
 
       return {
         content: [
