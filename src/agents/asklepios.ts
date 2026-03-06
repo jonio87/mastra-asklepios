@@ -8,7 +8,11 @@ import { captureDataTool } from '../tools/capture-data.js';
 import { queryDataTool } from '../tools/query-data.js';
 import { modelRouter } from '../utils/model-router.js';
 import { brainAgent } from './brain-agent.js';
+import { followupAgent } from './followup-agent.js';
+import { hypothesisAgent } from './hypothesis-agent.js';
+import { interviewAgent } from './interview-agent.js';
 import { phenotypeAgent } from './phenotype-agent.js';
+import { reportAgent } from './report-agent.js';
 import { researchAgent } from './research-agent.js';
 import { synthesisAgent } from './synthesis-agent.js';
 
@@ -21,18 +25,27 @@ export const defaultNetworkOptions: NetworkOptions = {
   routing: {
     additionalInstructions: `You are orchestrating a rare disease diagnostic workflow. Route tasks to the most appropriate specialist agent:
 
-## Agent Capabilities
-- **phenotype-agent**: Use for extracting symptoms from documents, mapping to HPO terms, and categorizing phenotypes by organ system. Best when the user provides medical documents or symptom descriptions that need standardization.
-- **research-agent**: Use for literature searches in PubMed, Orphanet lookups, and deep research across medical databases. Best when you need evidence from medical literature.
-- **synthesis-agent**: Use for combining research findings with phenotype data to generate ranked diagnostic hypotheses. Use AFTER phenotype extraction and research are complete. Best for differential diagnosis.
-- **asklepios-brain**: Use for cross-patient pattern matching. Query it BEFORE research to check if similar symptom combinations have been seen in other cases. Use it AFTER significant findings to share anonymized insights.
+## Agent Capabilities (9 agents)
+- **phenotype-agent**: Extract symptoms from documents, map to HPO terms, categorize by organ system.
+- **research-agent**: Literature searches in PubMed, Orphanet, ClinVar, OMIM. Evidence from medical databases.
+- **synthesis-agent**: Combine research + phenotype data into ranked diagnostic hypotheses. Supports adversarial modes (advocate/skeptic/arbiter).
+- **asklepios-brain**: Cross-patient pattern matching. Query BEFORE research, feed AFTER findings.
+- **interview-agent**: Generate diagnostic questions informed by records + evidence gaps. Cross-reference patient answers against T1 (official) data.
+- **hypothesis-agent**: Generate preliminary hypothesis set with tier-weighted confidence scoring. Identify GAPS that drive follow-up questions.
+- **followup-agent**: Generate SPECIFIC follow-up questions with declared PURPOSE ("If answer is X, it shifts hypothesis Y by Z%").
+- **report-agent**: Generate three-register deliverables: technical (clinicians), accessible (patients), structured (system). Supports multilingual output.
 
 ## Routing Strategy
 1. For new patient cases: Start with phenotype-agent to extract and standardize symptoms
 2. Before research: Query asklepios-brain for cross-patient patterns
-3. For evidence gathering: Use research-agent to search databases
-4. For diagnosis: Use synthesis-agent to combine all evidence into ranked hypotheses
-5. After significant findings: Feed insights to asklepios-brain
+3. When patient answers need cross-referencing against records: Use interview-agent
+4. For evidence gathering: Use research-agent to search databases
+5. After collecting sufficient evidence: Use hypothesis-agent to generate ranked hypotheses
+6. When hypotheses have identified gaps: Use followup-agent for specific questions
+7. For deep evidence evaluation of competing hypotheses: Use adversarial-synthesis tool
+8. For diagnosis: Use synthesis-agent to combine all evidence into ranked hypotheses
+9. For generating deliverables after synthesis: Use report-agent
+10. After significant findings: Feed insights to asklepios-brain
 
 ## Completion Criteria
 The task is complete when:
@@ -160,6 +173,10 @@ Example flow:
     'research-agent': researchAgent,
     'synthesis-agent': synthesisAgent,
     'asklepios-brain': brainAgent,
+    'interview-agent': interviewAgent,
+    'hypothesis-agent': hypothesisAgent,
+    'followup-agent': followupAgent,
+    'report-agent': reportAgent,
   },
   defaultNetworkOptions,
 });

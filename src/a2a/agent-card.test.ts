@@ -28,8 +28,8 @@ describe('A2A AgentCard', () => {
   });
 
   describe('skills', () => {
-    it('has 5 skills', () => {
-      expect(card.skills.length).toBe(5);
+    it('has 6 skills', () => {
+      expect(card.skills.length).toBe(6);
     });
 
     it.each([
@@ -38,6 +38,7 @@ describe('A2A AgentCard', () => {
       'phenotype',
       'cross-patient',
       'clinical-data',
+      'adversarial-synthesis',
     ])('includes %s skill', (skillId) => {
       const skill = card.skills.find((s) => s.id === skillId);
       expect(skill).toBeDefined();

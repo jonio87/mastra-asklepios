@@ -91,23 +91,21 @@ export type AuthMethod = 'env' | 'claude-code';
  *
  * Set via `ASKLEPIOS_AUTH` env var or pass directly.
  */
-export function getAnthropicProvider(authMethod?: AuthMethod): AnthropicProvider {
-  const method: AuthMethod =
-    authMethod ?? (process.env['ASKLEPIOS_AUTH'] as AuthMethod | undefined) ?? 'env';
-
-  if (method === 'claude-code') {
-    const token = readClaudeCodeToken();
-    if (token) {
-      // Claude Code OAuth tokens work as x-api-key (not Bearer)
-      return createAnthropic({ apiKey: token });
-    }
-    logger.warn('Claude Code auth failed, falling back to ANTHROPIC_API_KEY env var');
+export function getAnthropicProvider(_authMethod?: AuthMethod): AnthropicProvider {
+  // Always try Claude Code OAuth token first (works with Max subscription)
+  // OAuth tokens work as x-api-key (NOT Authorization: Bearer — Bearer returns
+  // "OAuth authentication is currently not supported" from Anthropic API).
+  // Max subscription routes to different model catalog — only new model IDs work
+  // (claude-sonnet-4-*, claude-opus-4-*, claude-haiku-4-5-*), NOT old IDs (claude-3-5-*).
+  const token = readClaudeCodeToken();
+  if (token) {
+    return createAnthropic({ apiKey: token });
   }
 
-  const apiKey = process.env['ANTHROPIC_API_KEY'];
-  return createAnthropic({
-    ...(apiKey ? { apiKey } : {}),
-  });
+  // No token available — create provider without explicit key
+  // (will fail at call time, but logs above already warned)
+  logger.warn('No Claude Code OAuth token available — LLM calls will fail');
+  return createAnthropic({});
 }
 
 /**

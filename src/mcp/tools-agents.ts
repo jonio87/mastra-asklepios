@@ -116,4 +116,116 @@ export function registerAgentTools(server: McpServer): void {
       };
     },
   );
+
+  server.registerTool(
+    'invoke_interview_agent',
+    {
+      description:
+        'Invoke the Interview Agent. Generates diagnostic questions informed by available records and evidence gaps. Cross-references patient answers against T1 data.',
+      inputSchema: {
+        message: z
+          .string()
+          .describe('Clinical context or patient response for the interview agent'),
+        patientId: z.string().optional().describe('Patient resource ID for memory scoping'),
+        threadId: z.string().optional().describe('Thread ID to continue a conversation'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async ({ message, patientId, threadId }) => {
+      const agent = mastra.getAgent('interview-agent');
+      const resourceId = patientId ?? 'asklepios-knowledge';
+      const thread = threadId ?? crypto.randomUUID();
+
+      const result = await agent.generate(message, {
+        memory: { thread, resource: resourceId },
+      });
+
+      return {
+        content: [{ type: 'text' as const, text: result.text }],
+      };
+    },
+  );
+
+  server.registerTool(
+    'invoke_hypothesis_agent',
+    {
+      description:
+        'Invoke the Hypothesis Generation Agent. Generates preliminary hypothesis set with tier-weighted confidence scoring and gap identification.',
+      inputSchema: {
+        message: z.string().describe('Clinical evidence summary for hypothesis generation'),
+        patientId: z.string().optional().describe('Patient resource ID for memory scoping'),
+        threadId: z.string().optional().describe('Thread ID to continue a conversation'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async ({ message, patientId, threadId }) => {
+      const agent = mastra.getAgent('hypothesis-agent');
+      const resourceId = patientId ?? 'asklepios-knowledge';
+      const thread = threadId ?? crypto.randomUUID();
+
+      const result = await agent.generate(message, {
+        memory: { thread, resource: resourceId },
+      });
+
+      return {
+        content: [{ type: 'text' as const, text: result.text }],
+      };
+    },
+  );
+
+  server.registerTool(
+    'invoke_followup_agent',
+    {
+      description:
+        'Invoke the Follow-Up Question Agent. Generates specific follow-up questions informed by hypothesis gaps, with declared purpose for each question.',
+      inputSchema: {
+        message: z
+          .string()
+          .describe('Hypothesis context and gaps for follow-up question generation'),
+        patientId: z.string().optional().describe('Patient resource ID for memory scoping'),
+        threadId: z.string().optional().describe('Thread ID to continue a conversation'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async ({ message, patientId, threadId }) => {
+      const agent = mastra.getAgent('followup-agent');
+      const resourceId = patientId ?? 'asklepios-knowledge';
+      const thread = threadId ?? crypto.randomUUID();
+
+      const result = await agent.generate(message, {
+        memory: { thread, resource: resourceId },
+      });
+
+      return {
+        content: [{ type: 'text' as const, text: result.text }],
+      };
+    },
+  );
+
+  server.registerTool(
+    'invoke_report_agent',
+    {
+      description:
+        'Invoke the Report Generation Agent. Generates three-register deliverables: technical (clinicians), accessible (patients), structured (system). Supports multilingual output.',
+      inputSchema: {
+        message: z.string().describe('Synthesis outputs and clinical data for report generation'),
+        patientId: z.string().optional().describe('Patient resource ID for memory scoping'),
+        threadId: z.string().optional().describe('Thread ID to continue a conversation'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async ({ message, patientId, threadId }) => {
+      const agent = mastra.getAgent('report-agent');
+      const resourceId = patientId ?? 'asklepios-knowledge';
+      const thread = threadId ?? crypto.randomUUID();
+
+      const result = await agent.generate(message, {
+        memory: { thread, resource: resourceId },
+      });
+
+      return {
+        content: [{ type: 'text' as const, text: result.text }],
+      };
+    },
+  );
 }

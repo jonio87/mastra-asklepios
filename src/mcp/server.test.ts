@@ -93,7 +93,7 @@ describe('MCP Server', () => {
       const server = createAsklepiosMcpServer();
       const { tools, resources, resourceTemplates, prompts } = getServerInternals(server);
 
-      expect(Object.keys(tools).length).toBe(29);
+      expect(Object.keys(tools).length).toBe(35);
       expect(Object.keys(resources).length + Object.keys(resourceTemplates).length).toBe(7);
       expect(Object.keys(prompts).length).toBe(4);
     });
@@ -127,8 +127,8 @@ describe('MCP Server', () => {
     const { tools } = getServerInternals(server);
     const toolNames = Object.keys(tools);
 
-    it('registers exactly 4 agent tools', () => {
-      expect(toolNames.length).toBe(4);
+    it('registers exactly 8 agent tools', () => {
+      expect(toolNames.length).toBe(8);
     });
 
     it.each([
@@ -136,6 +136,10 @@ describe('MCP Server', () => {
       'invoke_research_agent',
       'invoke_synthesis_agent',
       'invoke_brain_agent',
+      'invoke_interview_agent',
+      'invoke_hypothesis_agent',
+      'invoke_followup_agent',
+      'invoke_report_agent',
     ])('registers %s', (name) => {
       expect(toolNames).toContain(name);
     });

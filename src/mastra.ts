@@ -1,7 +1,11 @@
 import { Mastra } from '@mastra/core';
 import { asklepiosAgent } from './agents/asklepios.js';
 import { brainAgent } from './agents/brain-agent.js';
+import { followupAgent } from './agents/followup-agent.js';
+import { hypothesisAgent } from './agents/hypothesis-agent.js';
+import { interviewAgent } from './agents/interview-agent.js';
 import { phenotypeAgent } from './agents/phenotype-agent.js';
+import { reportAgent } from './agents/report-agent.js';
 import { researchAgent } from './agents/research-agent.js';
 import { synthesisAgent } from './agents/synthesis-agent.js';
 import { storage } from './memory.js';
@@ -29,8 +33,12 @@ export const mastra = new Mastra({
   agents: {
     asklepios: asklepiosAgent,
     'asklepios-brain': brainAgent,
-    researchAgent,
+    'followup-agent': followupAgent,
+    'hypothesis-agent': hypothesisAgent,
+    'interview-agent': interviewAgent,
     phenotypeAgent,
+    'report-agent': reportAgent,
+    researchAgent,
     synthesisAgent,
   },
   workflows: {

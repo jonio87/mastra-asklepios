@@ -80,11 +80,33 @@ export function getAgentCard(baseUrl?: string): AgentCard {
         description:
           'Capture and query structured clinical records: labs (with trend analysis), ' +
           'treatment trials (with drug class exhaustion tracking), consultations, ' +
-          'contradictions, and patient reports.',
-        tags: ['labs', 'treatments', 'clinical-record', 'contradictions', 'trends'],
+          'contradictions, and patient reports. All records support evidence provenance ' +
+          '(T1-official, T2-patient-reported, T3-ai-inferred).',
+        tags: [
+          'labs',
+          'treatments',
+          'clinical-record',
+          'contradictions',
+          'trends',
+          'evidence-tier',
+        ],
         examples: [
           'Record WBC lab result: 2.59 tys/µl on 2025-01-15, reference range 4.0-10.0, flagged low.',
           'Query all treatment trials for this patient, grouped by drug class with efficacy ratings.',
+        ],
+      },
+      {
+        id: 'adversarial-synthesis',
+        name: 'Adversarial Synthesis',
+        description:
+          'Three-perspective adversarial analysis (advocate/skeptic/unbiased) ' +
+          'for deep evidence evaluation of competing hypotheses. ' +
+          'External mode uses Parallel.ai ultra-deep research (20+ min per perspective). ' +
+          'Internal mode uses orchestrator-driven synthesis-agent calls.',
+        tags: ['adversarial', 'advocate', 'skeptic', 'synthesis', 'deep-research', 'parallel-ai'],
+        examples: [
+          'Evaluate the hypothesis "CVJ anomaly drives facial pain via trigeminocervical convergence" using adversarial synthesis with 3 perspectives.',
+          'Run advocate/skeptic/unbiased deep research on whether progressive weakness is myelopathic vs autoimmune.',
         ],
       },
     ],

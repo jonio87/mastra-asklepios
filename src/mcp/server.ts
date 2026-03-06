@@ -5,6 +5,7 @@ import { registerResources } from './resources.js';
 import { registerAgentTools } from './tools-agents.js';
 import { registerClinicalTools } from './tools-clinical.js';
 import { registerCoreTools } from './tools-core.js';
+import { registerResearchTools } from './tools-research.js';
 import { registerSessionTools } from './tools-session.js';
 import { registerStateTools } from './tools-state.js';
 import { registerStreamingTools } from './tools-streaming.js';
@@ -46,6 +47,7 @@ export function createAsklepiosMcpServer(): McpServer {
   registerStateTools(server);
   registerTaskTools(server);
   registerClinicalTools(server);
+  registerResearchTools(server);
   registerSessionTools(server);
   registerStreamingTools(server);
   registerResources(server);
