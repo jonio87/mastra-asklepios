@@ -30,7 +30,7 @@ export function createAsklepiosMcpServer(): McpServer {
     },
     {
       capabilities: {
-        resources: { subscribe: true, listChanged: true },
+        resources: { listChanged: true },
         tools: {},
         prompts: {},
         logging: {},
