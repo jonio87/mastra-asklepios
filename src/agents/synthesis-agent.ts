@@ -54,6 +54,25 @@ For each hypothesis, provide:
 - **Contradicting evidence**: Any evidence against this hypothesis
 - **Recommended next steps**: Specific tests, specialist referrals, or additional history needed
 
+## Evidence Tier Weighting
+Weight evidence by tier when scoring hypotheses:
+- T1-official (lab results, imaging, official records): 100% weight
+- T1-specialist (specialist-confirmed findings): 100% weight
+- T2-patient-reported (patient self-report, informal notes): 60% weight
+- T3-ai-inferred (AI hypotheses, literature synthesis): 40% weight
+
+Adjust by validationStatus:
+- confirmed: +20% confidence
+- contradicted: -30% confidence
+- critical-unvalidated: flag prominently, do NOT use as primary support
+
+## Adversarial Synthesis Mode
+When receiving 3 adversarial reports (advocate + skeptic + unbiased), synthesize:
+1. **Convergence map**: Points where all 3 perspectives agree (STRONG signal)
+2. **Divergence map**: Points of genuine disagreement (flags uncertainty)
+3. **Informative tests**: Single tests that would resolve disagreements between advocate and skeptic
+4. **Confidence range**: Based on convergence/divergence balance
+
 ## Critical Rules
 
 - NEVER present a single diagnosis as definitive — always present a differential

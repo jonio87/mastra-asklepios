@@ -1,5 +1,9 @@
 export { asklepiosAgent } from './asklepios.js';
 export { brainAgent } from './brain-agent.js';
+export { followupAgent } from './followup-agent.js';
+export { hypothesisAgent } from './hypothesis-agent.js';
+export { interviewAgent } from './interview-agent.js';
 export { phenotypeAgent } from './phenotype-agent.js';
+export { reportAgent } from './report-agent.js';
 export { researchAgent } from './research-agent.js';
 export { synthesisAgent } from './synthesis-agent.js';
