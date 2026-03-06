@@ -12,6 +12,26 @@ import { logger } from '../utils/logger.js';
  * The agent specifies `type` to route the query to the correct handler.
  */
 
+// ─── Provenance helper ──────────────────────────────────────────────
+
+interface ProvenanceOutput {
+  evidenceTier?: string;
+  validationStatus?: string;
+  sourceCredibility?: number;
+}
+
+function pickProvenance(row: {
+  evidenceTier?: string | undefined;
+  validationStatus?: string | undefined;
+  sourceCredibility?: number | undefined;
+}): ProvenanceOutput {
+  const p: ProvenanceOutput = {};
+  if (row.evidenceTier) p.evidenceTier = row.evidenceTier;
+  if (row.validationStatus) p.validationStatus = row.validationStatus;
+  if (row.sourceCredibility !== undefined) p.sourceCredibility = row.sourceCredibility;
+  return p;
+}
+
 // ─── Lab query helpers ───────────────────────────────────────────────
 
 interface LabQueryInput {
@@ -38,6 +58,9 @@ function mapLabRow(l: {
   date: string;
   flag?: string | undefined;
   referenceRange?: string | undefined;
+  evidenceTier?: string | undefined;
+  validationStatus?: string | undefined;
+  sourceCredibility?: number | undefined;
 }) {
   const r: {
     testName: string;
@@ -46,10 +69,10 @@ function mapLabRow(l: {
     date: string;
     flag?: string;
     referenceRange?: string;
-  } = { testName: l.testName, value: l.value, unit: l.unit, date: l.date };
+  } & ProvenanceOutput = { testName: l.testName, value: l.value, unit: l.unit, date: l.date };
   if (l.flag) r.flag = l.flag;
   if (l.referenceRange) r.referenceRange = l.referenceRange;
-  return r;
+  return { ...r, ...pickProvenance(l) };
 }
 
 async function fetchLabTrend(store: ClinicalStore, input: LabQueryInput) {
@@ -94,6 +117,9 @@ function mapTreatmentRow(t: {
   sideEffects?: string[] | undefined;
   reasonDiscontinued?: string | undefined;
   adequateTrial?: boolean | undefined;
+  evidenceTier?: string | undefined;
+  validationStatus?: string | undefined;
+  sourceCredibility?: number | undefined;
 }) {
   const r: {
     medication: string;
@@ -113,7 +139,7 @@ function mapTreatmentRow(t: {
   if (t.sideEffects) r.sideEffects = t.sideEffects;
   if (t.reasonDiscontinued) r.reasonDiscontinued = t.reasonDiscontinued;
   if (t.adequateTrial !== undefined) r.adequateTrial = t.adequateTrial;
-  return r;
+  return { ...r, ...pickProvenance(t) };
 }
 
 // ─── Consultation row mapper ─────────────────────────────────────────
@@ -127,6 +153,9 @@ function mapConsultationRow(c: {
   findings?: string | undefined;
   conclusions?: string | undefined;
   recommendations?: string[] | undefined;
+  evidenceTier?: string | undefined;
+  validationStatus?: string | undefined;
+  sourceCredibility?: number | undefined;
 }) {
   const r: {
     provider: string;
@@ -147,7 +176,7 @@ function mapConsultationRow(c: {
   if (c.findings) r.findings = c.findings;
   if (c.conclusions) r.conclusions = c.conclusions;
   if (c.recommendations) r.recommendations = c.recommendations;
-  return r;
+  return { ...r, ...pickProvenance(c) };
 }
 
 // ─── Contradiction row mapper ────────────────────────────────────────
@@ -162,6 +191,9 @@ function mapContradictionRow(c: {
   finding2Method?: string | undefined;
   resolutionPlan?: string | undefined;
   diagnosticImpact?: string | undefined;
+  evidenceTier?: string | undefined;
+  validationStatus?: string | undefined;
+  sourceCredibility?: number | undefined;
 }) {
   const r: {
     finding1: string;
@@ -180,7 +212,7 @@ function mapContradictionRow(c: {
   if (c.finding2Method) r.finding2Method = c.finding2Method;
   if (c.resolutionPlan) r.resolutionPlan = c.resolutionPlan;
   if (c.diagnosticImpact) r.diagnosticImpact = c.diagnosticImpact;
-  return r;
+  return { ...r, ...pickProvenance(c) };
 }
 
 // ─── Exhausted drug class computation ────────────────────────────────
@@ -248,13 +280,49 @@ const patientHistoryQuery = z.object({
     .describe('Only include data from the last N days (default: 90)'),
 });
 
-const queryDataInputSchema = z.discriminatedUnion('type', [
+/**
+ * Keep the discriminated union for runtime parsing — it gives precise per-type validation.
+ * But Anthropic's API rejects `oneOf` at the top level of tool `input_schema`,
+ * so we also build a flat `z.object()` that produces `"type":"object"` in JSON Schema.
+ */
+const queryDataUnion = z.discriminatedUnion('type', [
   labsQuery,
   treatmentsQuery,
   consultationsQuery,
   contradictionsQuery,
   patientHistoryQuery,
 ]);
+
+const queryDataInputSchema = z.object({
+  type: z
+    .enum(['labs', 'treatments', 'consultations', 'contradictions', 'patient-history'])
+    .describe('Type of clinical data to query'),
+  patientId: z.string().describe('Patient resource ID'),
+  // labs-specific fields
+  testName: z.string().optional().describe('(labs) Filter by test name (e.g., "WBC", "CRP")'),
+  dateFrom: z.string().optional().describe('(labs) Start date (ISO 8601)'),
+  dateTo: z.string().optional().describe('(labs) End date (ISO 8601)'),
+  computeTrend: z
+    .boolean()
+    .optional()
+    .describe('(labs) Compute trend analysis if testName provided'),
+  // treatments-specific fields
+  drugClass: z.string().optional().describe('(treatments) Filter by drug class (e.g., "CGRP mAb")'),
+  efficacy: z.string().optional().describe('(treatments) Filter by efficacy'),
+  // consultations-specific fields
+  specialty: z.string().optional().describe('(consultations) Filter by specialty'),
+  provider: z.string().optional().describe('(consultations) Filter by provider name'),
+  // contradictions-specific fields
+  status: z
+    .enum(['unresolved', 'pending', 'resolved'])
+    .optional()
+    .describe('(contradictions) Filter by resolution status'),
+  // patient-history-specific fields
+  recentDays: z
+    .number()
+    .optional()
+    .describe('(patient-history) Only include data from the last N days (default: 90)'),
+});
 
 // ─── Handler functions (one per query type) ──────────────────────────
 
@@ -356,7 +424,7 @@ async function handlePatientHistoryQuery(
           content: r.content,
         };
         if (r.severity !== undefined) out.severity = r.severity;
-        return out;
+        return { ...out, ...pickProvenance(r) };
       }),
       learnings: learnings.map((l) => {
         const out: { category: string; content: string; confidence?: number } = {
@@ -364,7 +432,7 @@ async function handlePatientHistoryQuery(
           content: l.content,
         };
         if (l.confidence !== undefined) out.confidence = l.confidence;
-        return out;
+        return { ...out, ...pickProvenance(l) };
       }),
       recentLabs: labs.map((l) => {
         const out: {
@@ -375,7 +443,7 @@ async function handlePatientHistoryQuery(
           flag?: string;
         } = { testName: l.testName, value: l.value, unit: l.unit, date: l.date };
         if (l.flag) out.flag = l.flag;
-        return out;
+        return { ...out, ...pickProvenance(l) };
       }),
       unresolvedContradictions: contradictions.length,
     },
@@ -398,18 +466,20 @@ export const queryDataTool = createTool({
   }),
   execute: async (input) => {
     const store = getClinicalStore();
+    // Re-parse through the discriminated union for precise per-type validation
+    const parsed = queryDataUnion.parse(input);
 
-    switch (input.type) {
+    switch (parsed.type) {
       case 'labs':
-        return handleLabsQuery(store, input);
+        return handleLabsQuery(store, parsed);
       case 'treatments':
-        return handleTreatmentsQuery(store, input);
+        return handleTreatmentsQuery(store, parsed);
       case 'consultations':
-        return handleConsultationsQuery(store, input);
+        return handleConsultationsQuery(store, parsed);
       case 'contradictions':
-        return handleContradictionsQuery(store, input);
+        return handleContradictionsQuery(store, parsed);
       case 'patient-history':
-        return handlePatientHistoryQuery(store, input);
+        return handlePatientHistoryQuery(store, parsed);
     }
   },
 });

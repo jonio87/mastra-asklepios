@@ -42,97 +42,131 @@ export class ClinicalStore {
   private async migrate(): Promise<void> {
     const statements = [
       `CREATE TABLE IF NOT EXISTS clinical_lab_results (
-				id TEXT PRIMARY KEY,
-				patient_id TEXT NOT NULL,
-				test_name TEXT NOT NULL,
-				value TEXT NOT NULL,
-				unit TEXT NOT NULL,
-				reference_range TEXT,
-				flag TEXT,
-				date TEXT NOT NULL,
-				source TEXT,
-				notes TEXT,
-				created_at TEXT NOT NULL DEFAULT (datetime('now'))
-			)`,
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                test_name TEXT NOT NULL,
+                value TEXT NOT NULL,
+                unit TEXT NOT NULL,
+                reference_range TEXT,
+                flag TEXT,
+                date TEXT NOT NULL,
+                source TEXT,
+                notes TEXT,
+                evidence_tier TEXT,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
       `CREATE INDEX IF NOT EXISTS idx_labs_patient_date ON clinical_lab_results(patient_id, date)`,
       `CREATE INDEX IF NOT EXISTS idx_labs_patient_test ON clinical_lab_results(patient_id, test_name)`,
-
       `CREATE TABLE IF NOT EXISTS clinical_treatment_trials (
-				id TEXT PRIMARY KEY,
-				patient_id TEXT NOT NULL,
-				medication TEXT NOT NULL,
-				drug_class TEXT,
-				indication TEXT,
-				start_date TEXT,
-				end_date TEXT,
-				dosage TEXT,
-				efficacy TEXT NOT NULL,
-				side_effects TEXT,
-				reason_discontinued TEXT,
-				adequate_trial INTEGER,
-				created_at TEXT NOT NULL DEFAULT (datetime('now'))
-			)`,
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                medication TEXT NOT NULL,
+                drug_class TEXT,
+                indication TEXT,
+                start_date TEXT,
+                end_date TEXT,
+                dosage TEXT,
+                efficacy TEXT NOT NULL,
+                side_effects TEXT,
+                reason_discontinued TEXT,
+                adequate_trial INTEGER,
+                evidence_tier TEXT,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
       `CREATE INDEX IF NOT EXISTS idx_treatments_patient ON clinical_treatment_trials(patient_id)`,
-
       `CREATE TABLE IF NOT EXISTS clinical_consultations (
-				id TEXT PRIMARY KEY,
-				patient_id TEXT NOT NULL,
-				provider TEXT NOT NULL,
-				specialty TEXT NOT NULL,
-				institution TEXT,
-				date TEXT NOT NULL,
-				reason TEXT,
-				findings TEXT,
-				conclusions TEXT,
-				conclusions_status TEXT NOT NULL,
-				recommendations TEXT,
-				created_at TEXT NOT NULL DEFAULT (datetime('now'))
-			)`,
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                specialty TEXT NOT NULL,
+                institution TEXT,
+                date TEXT NOT NULL,
+                reason TEXT,
+                findings TEXT,
+                conclusions TEXT,
+                conclusions_status TEXT NOT NULL,
+                recommendations TEXT,
+                evidence_tier TEXT,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
       `CREATE INDEX IF NOT EXISTS idx_consultations_patient ON clinical_consultations(patient_id)`,
-
       `CREATE TABLE IF NOT EXISTS clinical_contradictions (
-				id TEXT PRIMARY KEY,
-				patient_id TEXT NOT NULL,
-				finding1 TEXT NOT NULL,
-				finding1_date TEXT,
-				finding1_method TEXT,
-				finding2 TEXT NOT NULL,
-				finding2_date TEXT,
-				finding2_method TEXT,
-				resolution_status TEXT NOT NULL,
-				resolution_plan TEXT,
-				diagnostic_impact TEXT,
-				created_at TEXT NOT NULL DEFAULT (datetime('now'))
-			)`,
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                finding1 TEXT NOT NULL,
+                finding1_date TEXT,
+                finding1_method TEXT,
+                finding2 TEXT NOT NULL,
+                finding2_date TEXT,
+                finding2_method TEXT,
+                resolution_status TEXT NOT NULL,
+                resolution_plan TEXT,
+                diagnostic_impact TEXT,
+                evidence_tier TEXT,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
       `CREATE INDEX IF NOT EXISTS idx_contradictions_patient ON clinical_contradictions(patient_id)`,
-
       `CREATE TABLE IF NOT EXISTS clinical_patient_reports (
-				id TEXT PRIMARY KEY,
-				patient_id TEXT NOT NULL,
-				date TEXT NOT NULL,
-				type TEXT NOT NULL,
-				content TEXT NOT NULL,
-				severity INTEGER,
-				extracted_insights TEXT,
-				created_at TEXT NOT NULL DEFAULT (datetime('now'))
-			)`,
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                date TEXT NOT NULL,
+                type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                severity INTEGER,
+                extracted_insights TEXT,
+                evidence_tier TEXT,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
       `CREATE INDEX IF NOT EXISTS idx_reports_patient_type ON clinical_patient_reports(patient_id, type)`,
-
       `CREATE TABLE IF NOT EXISTS clinical_agent_learnings (
-				id TEXT PRIMARY KEY,
-				patient_id TEXT NOT NULL,
-				date TEXT NOT NULL,
-				category TEXT NOT NULL,
-				content TEXT NOT NULL,
-				confidence INTEGER,
-				related_hypotheses TEXT,
-				created_at TEXT NOT NULL DEFAULT (datetime('now'))
-			)`,
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                date TEXT NOT NULL,
+                category TEXT NOT NULL,
+                content TEXT NOT NULL,
+                confidence INTEGER,
+                related_hypotheses TEXT,
+                evidence_tier TEXT,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
       `CREATE INDEX IF NOT EXISTS idx_learnings_patient_cat ON clinical_agent_learnings(patient_id, category)`,
     ];
 
     for (const sql of statements) {
       await this.client.execute(sql);
+    }
+
+    // Migration for existing databases: add evidence provenance columns
+    const provenanceTables = [
+      'clinical_lab_results',
+      'clinical_treatment_trials',
+      'clinical_consultations',
+      'clinical_contradictions',
+      'clinical_patient_reports',
+      'clinical_agent_learnings',
+    ];
+    for (const table of provenanceTables) {
+      for (const col of ['evidence_tier', 'validation_status', 'source_credibility']) {
+        await this.client
+          .execute(
+            `ALTER TABLE ${table} ADD COLUMN ${col} ${col === 'source_credibility' ? 'INTEGER' : 'TEXT'}`,
+          )
+          .catch(() => {
+            /* column already exists */
+          });
+      }
     }
     logger.debug('ClinicalStore migration complete');
   }
@@ -143,8 +177,9 @@ export class ClinicalStore {
     await this.ensureInitialized();
     await this.client.execute({
       sql: `INSERT OR REPLACE INTO clinical_lab_results
-				(id, patient_id, test_name, value, unit, reference_range, flag, date, source, notes)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                (id, patient_id, test_name, value, unit, reference_range, flag, date, source, notes,
+                 evidence_tier, validation_status, source_credibility)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         lab.id,
         lab.patientId,
@@ -156,6 +191,9 @@ export class ClinicalStore {
         lab.date,
         lab.source ?? null,
         lab.notes ?? null,
+        lab.evidenceTier ?? null,
+        lab.validationStatus ?? null,
+        lab.sourceCredibility ?? null,
       ],
     });
   }
@@ -204,6 +242,7 @@ export class ClinicalStore {
       date: String(row['date']),
       source: row['source'] ? String(row['source']) : undefined,
       notes: row['notes'] ? String(row['notes']) : undefined,
+      ...mapProvenance(row as Record<string, unknown>),
     }));
   }
 
@@ -257,9 +296,10 @@ export class ClinicalStore {
     await this.ensureInitialized();
     await this.client.execute({
       sql: `INSERT OR REPLACE INTO clinical_treatment_trials
-				(id, patient_id, medication, drug_class, indication, start_date, end_date,
-				 dosage, efficacy, side_effects, reason_discontinued, adequate_trial)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                (id, patient_id, medication, drug_class, indication, start_date, end_date,
+                 dosage, efficacy, side_effects, reason_discontinued, adequate_trial,
+                 evidence_tier, validation_status, source_credibility)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         trial.id,
         trial.patientId,
@@ -273,6 +313,9 @@ export class ClinicalStore {
         trial.sideEffects ? JSON.stringify(trial.sideEffects) : null,
         trial.reasonDiscontinued ?? null,
         trial.adequateTrial === undefined ? null : trial.adequateTrial ? 1 : 0,
+        trial.evidenceTier ?? null,
+        trial.validationStatus ?? null,
+        trial.sourceCredibility ?? null,
       ],
     });
   }
@@ -309,9 +352,10 @@ export class ClinicalStore {
     await this.ensureInitialized();
     await this.client.execute({
       sql: `INSERT OR REPLACE INTO clinical_consultations
-				(id, patient_id, provider, specialty, institution, date, reason, findings,
-				 conclusions, conclusions_status, recommendations)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                (id, patient_id, provider, specialty, institution, date, reason, findings,
+                 conclusions, conclusions_status, recommendations,
+                 evidence_tier, validation_status, source_credibility)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         consultation.id,
         consultation.patientId,
@@ -324,6 +368,9 @@ export class ClinicalStore {
         consultation.conclusions ?? null,
         consultation.conclusionsStatus,
         consultation.recommendations ? JSON.stringify(consultation.recommendations) : null,
+        consultation.evidenceTier ?? null,
+        consultation.validationStatus ?? null,
+        consultation.sourceCredibility ?? null,
       ],
     });
   }
@@ -365,6 +412,7 @@ export class ClinicalStore {
       recommendations: row['recommendations']
         ? (JSON.parse(String(row['recommendations'])) as string[])
         : undefined,
+      ...mapProvenance(row as Record<string, unknown>),
     }));
   }
 
@@ -374,10 +422,11 @@ export class ClinicalStore {
     await this.ensureInitialized();
     await this.client.execute({
       sql: `INSERT OR REPLACE INTO clinical_contradictions
-				(id, patient_id, finding1, finding1_date, finding1_method,
-				 finding2, finding2_date, finding2_method,
-				 resolution_status, resolution_plan, diagnostic_impact)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                (id, patient_id, finding1, finding1_date, finding1_method,
+                 finding2, finding2_date, finding2_method,
+                 resolution_status, resolution_plan, diagnostic_impact,
+                 evidence_tier, validation_status, source_credibility)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         contradiction.id,
         contradiction.patientId,
@@ -390,6 +439,9 @@ export class ClinicalStore {
         contradiction.resolutionStatus,
         contradiction.resolutionPlan ?? null,
         contradiction.diagnosticImpact ?? null,
+        contradiction.evidenceTier ?? null,
+        contradiction.validationStatus ?? null,
+        contradiction.sourceCredibility ?? null,
       ],
     });
   }
@@ -424,6 +476,7 @@ export class ClinicalStore {
       resolutionStatus: String(row['resolution_status']) as Contradiction['resolutionStatus'],
       resolutionPlan: row['resolution_plan'] ? String(row['resolution_plan']) : undefined,
       diagnosticImpact: row['diagnostic_impact'] ? String(row['diagnostic_impact']) : undefined,
+      ...mapProvenance(row as Record<string, unknown>),
     }));
   }
 
@@ -433,8 +486,9 @@ export class ClinicalStore {
     await this.ensureInitialized();
     await this.client.execute({
       sql: `INSERT OR REPLACE INTO clinical_patient_reports
-				(id, patient_id, date, type, content, severity, extracted_insights)
-				VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                (id, patient_id, date, type, content, severity, extracted_insights,
+                 evidence_tier, validation_status, source_credibility)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         report.id,
         report.patientId,
@@ -443,6 +497,9 @@ export class ClinicalStore {
         report.content,
         report.severity ?? null,
         report.extractedInsights ? JSON.stringify(report.extractedInsights) : null,
+        report.evidenceTier ?? null,
+        report.validationStatus ?? null,
+        report.sourceCredibility ?? null,
       ],
     });
   }
@@ -485,6 +542,7 @@ export class ClinicalStore {
       extractedInsights: row['extracted_insights']
         ? (JSON.parse(String(row['extracted_insights'])) as string[])
         : undefined,
+      ...mapProvenance(row as Record<string, unknown>),
     }));
   }
 
@@ -494,8 +552,9 @@ export class ClinicalStore {
     await this.ensureInitialized();
     await this.client.execute({
       sql: `INSERT OR REPLACE INTO clinical_agent_learnings
-				(id, patient_id, date, category, content, confidence, related_hypotheses)
-				VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                (id, patient_id, date, category, content, confidence, related_hypotheses,
+                 evidence_tier, validation_status, source_credibility)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         learning.id,
         learning.patientId,
@@ -504,6 +563,9 @@ export class ClinicalStore {
         learning.content,
         learning.confidence ?? null,
         learning.relatedHypotheses ? JSON.stringify(learning.relatedHypotheses) : null,
+        learning.evidenceTier ?? null,
+        learning.validationStatus ?? null,
+        learning.sourceCredibility ?? null,
       ],
     });
   }
@@ -533,6 +595,7 @@ export class ClinicalStore {
       relatedHypotheses: row['related_hypotheses']
         ? (JSON.parse(String(row['related_hypotheses'])) as string[])
         : undefined,
+      ...mapProvenance(row as Record<string, unknown>),
     }));
   }
 
@@ -547,6 +610,19 @@ export class ClinicalStore {
 
 function optStr(val: unknown): string | undefined {
   return val ? String(val) : undefined;
+}
+
+function mapProvenance(row: Record<string, unknown>): {
+  evidenceTier?: LabResult['evidenceTier'];
+  validationStatus?: LabResult['validationStatus'];
+  sourceCredibility?: number;
+} {
+  const result: Record<string, unknown> = {};
+  if (row['evidence_tier']) result['evidenceTier'] = String(row['evidence_tier']);
+  if (row['validation_status']) result['validationStatus'] = String(row['validation_status']);
+  if (row['source_credibility'] !== null && row['source_credibility'] !== undefined)
+    result['sourceCredibility'] = Number(row['source_credibility']);
+  return result as ReturnType<typeof mapProvenance>;
 }
 
 function mapRowToTreatmentTrial(row: Record<string, unknown>): TreatmentTrial {
@@ -565,6 +641,7 @@ function mapRowToTreatmentTrial(row: Record<string, unknown>): TreatmentTrial {
       : undefined,
     reasonDiscontinued: optStr(row['reason_discontinued']),
     adequateTrial: row['adequate_trial'] === null ? undefined : Boolean(row['adequate_trial']),
+    ...mapProvenance(row),
   };
 }
 

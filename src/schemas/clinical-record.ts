@@ -11,7 +11,34 @@ import { z } from 'zod';
  * - Dates are ISO 8601 strings for SQL range queries
  * - Enums use clinical terminology familiar to the agent
  * - Optional fields use Zod .optional() for sparse data
+ * - Evidence provenance fields (evidenceTier, validationStatus, sourceCredibility) on all records
  */
+
+// ─── Evidence Provenance (shared across all record types) ───────────────
+
+export const evidenceTierEnum = z.enum([
+  'T1-official', // Lab reports, imaging, official medical records
+  'T1-specialist', // Specialist-confirmed findings
+  'T2-patient-reported', // Patient self-report, informal notes
+  'T3-ai-inferred', // AI hypotheses, literature synthesis
+]);
+
+export const validationStatusEnum = z.enum([
+  'unvalidated', // Not yet checked against T1 data
+  'confirmed', // Matches T1 records
+  'contradicted', // Conflicts with T1 records
+  'critical-unvalidated', // Clinically important, no T1 verification
+]);
+
+/** Fields added to every clinical record type for evidence tracking */
+const evidenceProvenanceFields = {
+  evidenceTier: evidenceTierEnum.optional(),
+  validationStatus: validationStatusEnum.optional(),
+  sourceCredibility: z.number().int().min(0).max(100).optional(), // 0-100
+};
+
+export type EvidenceTier = z.infer<typeof evidenceTierEnum>;
+export type ValidationStatus = z.infer<typeof validationStatusEnum>;
 
 // ─── Lab Results ────────────────────────────────────────────────────────
 
@@ -25,6 +52,7 @@ export const labResultSchema = z.object({
   date: z.string(), // ISO 8601
   source: z.string().optional(), // "Diagnostyka Sp. z o.o."
   notes: z.string().optional(),
+  ...evidenceProvenanceFields,
   patientId: z.string(),
 });
 
@@ -44,6 +72,7 @@ export const treatmentTrialSchema = z.object({
   sideEffects: z.array(z.string()).optional(),
   reasonDiscontinued: z.string().optional(),
   adequateTrial: z.boolean().optional(), // Was dose/duration adequate?
+  ...evidenceProvenanceFields,
   patientId: z.string(),
 });
 
@@ -62,6 +91,7 @@ export const consultationSchema = z.object({
   conclusions: z.string().optional(),
   conclusionsStatus: z.enum(['documented', 'unknown', 'pending']),
   recommendations: z.array(z.string()).optional(),
+  ...evidenceProvenanceFields,
   patientId: z.string(),
 });
 
@@ -80,6 +110,7 @@ export const contradictionSchema = z.object({
   resolutionStatus: z.enum(['unresolved', 'pending', 'resolved']),
   resolutionPlan: z.string().optional(), // "Third platform ELISA recommended"
   diagnosticImpact: z.string().optional(), // "Affects Sjögren hypothesis confidence"
+  ...evidenceProvenanceFields,
   patientId: z.string(),
 });
 
@@ -101,6 +132,7 @@ export const patientReportSchema = z.object({
   content: z.string(),
   severity: z.number().min(1).max(10).optional(),
   extractedInsights: z.array(z.string()).optional(),
+  ...evidenceProvenanceFields,
   patientId: z.string(),
 });
 
@@ -123,6 +155,7 @@ export const agentLearningSchema = z.object({
   content: z.string(),
   confidence: z.number().min(0).max(100).optional(),
   relatedHypotheses: z.array(z.string()).optional(),
+  ...evidenceProvenanceFields,
   patientId: z.string(),
 });
 

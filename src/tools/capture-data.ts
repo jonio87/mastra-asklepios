@@ -1,8 +1,40 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
+import type { EvidenceTier, ValidationStatus } from '../schemas/clinical-record.js';
 import type { ClinicalStore } from '../storage/clinical-store.js';
 import { getClinicalStore } from '../storage/clinical-store.js';
 import { logger } from '../utils/logger.js';
+
+const provenanceFields = {
+  evidenceTier: z
+    .enum(['T1-official', 'T1-specialist', 'T2-patient-reported', 'T3-ai-inferred'])
+    .optional()
+    .describe('Evidence tier: T1-official, T1-specialist, T2-patient-reported, T3-ai-inferred'),
+  validationStatus: z
+    .enum(['unvalidated', 'confirmed', 'contradicted', 'critical-unvalidated'])
+    .optional()
+    .describe('Validation status against T1 data'),
+  sourceCredibility: z
+    .number()
+    .int()
+    .min(0)
+    .max(100)
+    .optional()
+    .describe('Source credibility 0-100'),
+};
+
+function applyProvenance(
+  record: Record<string, unknown>,
+  input: {
+    evidenceTier?: EvidenceTier | undefined;
+    validationStatus?: ValidationStatus | undefined;
+    sourceCredibility?: number | undefined;
+  },
+): void {
+  if (input.evidenceTier) record['evidenceTier'] = input.evidenceTier;
+  if (input.validationStatus) record['validationStatus'] = input.validationStatus;
+  if (input.sourceCredibility !== undefined) record['sourceCredibility'] = input.sourceCredibility;
+}
 
 /**
  * Consolidated capture tool — single discriminated-union tool that replaces
@@ -28,6 +60,7 @@ const patientReportData = z.object({
   content: z.string().describe('What the patient reported'),
   severity: z.number().min(1).max(10).optional().describe('Severity 1-10'),
   extractedInsights: z.array(z.string()).optional().describe('Key clinical insights extracted'),
+  ...provenanceFields,
 });
 
 const agentLearningData = z.object({
@@ -47,6 +80,7 @@ const agentLearningData = z.object({
   content: z.string().describe('The insight or pattern'),
   confidence: z.number().min(0).max(100).optional().describe('Confidence 0-100'),
   relatedHypotheses: z.array(z.string()).optional().describe('Related diagnostic hypotheses'),
+  ...provenanceFields,
 });
 
 const contradictionData = z.object({
@@ -60,6 +94,7 @@ const contradictionData = z.object({
   finding2Method: z.string().optional().describe('Method/platform of second finding'),
   resolutionPlan: z.string().optional().describe('Plan to resolve'),
   diagnosticImpact: z.string().optional().describe('Impact on differential diagnosis'),
+  ...provenanceFields,
 });
 
 const labResultData = z.object({
@@ -73,6 +108,7 @@ const labResultData = z.object({
   flag: z.enum(['normal', 'low', 'high', 'critical']).optional().describe('Flag status'),
   source: z.string().optional().describe('Lab/institution'),
   notes: z.string().optional().describe('Additional notes'),
+  ...provenanceFields,
 });
 
 const treatmentTrialData = z.object({
@@ -90,6 +126,7 @@ const treatmentTrialData = z.object({
   sideEffects: z.array(z.string()).optional().describe('Side effects'),
   reasonDiscontinued: z.string().optional().describe('Why stopped'),
   adequateTrial: z.boolean().optional().describe('Was the trial adequate?'),
+  ...provenanceFields,
 });
 
 const consultationData = z.object({
@@ -106,9 +143,17 @@ const consultationData = z.object({
   findings: z.string().optional().describe('Clinical findings'),
   conclusions: z.string().optional().describe('Specialist conclusions'),
   recommendations: z.array(z.string()).optional().describe('Specialist recommendations'),
+  ...provenanceFields,
 });
 
-const captureDataInputSchema = z.discriminatedUnion('type', [
+/**
+ * Keep the discriminated union for runtime parsing — it gives precise per-type validation.
+ * But Anthropic's API rejects `oneOf` at the top level of tool `input_schema`,
+ * so we also build a flat `z.object()` that produces `"type":"object"` in JSON Schema.
+ * The flat schema is used as the tool's `inputSchema` (what the LLM sees),
+ * while the discriminated union is used inside `execute` to validate at runtime.
+ */
+const captureDataUnion = z.discriminatedUnion('type', [
   patientReportData,
   agentLearningData,
   contradictionData,
@@ -116,6 +161,108 @@ const captureDataInputSchema = z.discriminatedUnion('type', [
   treatmentTrialData,
   consultationData,
 ]);
+
+const captureDataInputSchema = z.object({
+  type: z
+    .enum([
+      'patient-report',
+      'agent-learning',
+      'contradiction',
+      'lab-result',
+      'treatment-trial',
+      'consultation',
+    ])
+    .describe('Type of clinical data to capture'),
+  patientId: z.string().describe('Patient resource ID'),
+  // patient-report fields
+  reportType: z
+    .enum([
+      'symptom-update',
+      'treatment-response',
+      'concern',
+      'goal',
+      'functional-status',
+      'self-observation',
+    ])
+    .optional()
+    .describe('(patient-report) Type of patient report'),
+  content: z.string().optional().describe('Text content of the report/learning'),
+  severity: z.number().min(1).max(10).optional().describe('(patient-report) Severity 1-10'),
+  extractedInsights: z
+    .array(z.string())
+    .optional()
+    .describe('(patient-report) Key clinical insights extracted'),
+  // agent-learning fields
+  category: z
+    .enum([
+      'pattern-noticed',
+      'contradiction-found',
+      'treatment-insight',
+      'patient-behavior',
+      'temporal-correlation',
+      'diagnostic-clue',
+      'evidence-gap',
+    ])
+    .optional()
+    .describe('(agent-learning) Category of learning'),
+  confidence: z.number().min(0).max(100).optional().describe('(agent-learning) Confidence 0-100'),
+  relatedHypotheses: z
+    .array(z.string())
+    .optional()
+    .describe('(agent-learning) Related diagnostic hypotheses'),
+  // contradiction fields
+  finding1: z.string().optional().describe('(contradiction) First finding'),
+  finding1Date: z.string().optional().describe('(contradiction) Date of first finding'),
+  finding1Method: z.string().optional().describe('(contradiction) Method of first finding'),
+  finding2: z.string().optional().describe('(contradiction) Second (contradicting) finding'),
+  finding2Date: z.string().optional().describe('(contradiction) Date of second finding'),
+  finding2Method: z.string().optional().describe('(contradiction) Method of second finding'),
+  resolutionPlan: z.string().optional().describe('(contradiction) Plan to resolve'),
+  diagnosticImpact: z.string().optional().describe('(contradiction) Impact on diagnosis'),
+  // lab-result fields
+  testName: z.string().optional().describe('(lab-result) Test name (e.g., "WBC", "CRP")'),
+  value: z.union([z.number(), z.string()]).optional().describe('(lab-result) Test value'),
+  unit: z.string().optional().describe('(lab-result) Unit of measurement'),
+  date: z.string().optional().describe('Date (ISO 8601) — used by lab-result and consultation'),
+  referenceRange: z.string().optional().describe('(lab-result) Reference range'),
+  flag: z
+    .enum(['normal', 'low', 'high', 'critical'])
+    .optional()
+    .describe('(lab-result) Flag status'),
+  source: z.string().optional().describe('(lab-result) Lab/institution'),
+  notes: z.string().optional().describe('Additional notes'),
+  // treatment-trial fields
+  medication: z.string().optional().describe('(treatment-trial) Medication name'),
+  efficacy: z
+    .enum(['none', 'minimal', 'partial', 'significant', 'complete', 'unknown'])
+    .optional()
+    .describe('(treatment-trial) Treatment efficacy'),
+  drugClass: z.string().optional().describe('(treatment-trial) Drug class (e.g., "CGRP mAb")'),
+  indication: z.string().optional().describe('(treatment-trial) What it was prescribed for'),
+  startDate: z.string().optional().describe('(treatment-trial) When started'),
+  endDate: z.string().optional().describe('(treatment-trial) When stopped'),
+  dosage: z.string().optional().describe('(treatment-trial) Dosage and frequency'),
+  sideEffects: z.array(z.string()).optional().describe('(treatment-trial) Side effects'),
+  reasonDiscontinued: z.string().optional().describe('(treatment-trial) Why stopped'),
+  adequateTrial: z.boolean().optional().describe('(treatment-trial) Was the trial adequate?'),
+  // consultation fields
+  provider: z.string().optional().describe('(consultation) Provider name'),
+  specialty: z.string().optional().describe('(consultation) Medical specialty'),
+  conclusionsStatus: z
+    .enum(['documented', 'unknown', 'pending'])
+    .optional()
+    .describe('(consultation) Whether conclusions are documented'),
+  institution: z.string().optional().describe('(consultation) Institution name'),
+  reason: z.string().optional().describe('(consultation) Reason for consultation'),
+  findings: z.string().optional().describe('(consultation) Clinical findings'),
+  conclusions: z.string().optional().describe('(consultation) Specialist conclusions'),
+  recommendations: z
+    .array(z.string())
+    .optional()
+    .describe('(consultation) Specialist recommendations'),
+  // provenance fields
+  ...provenanceFields,
+});
 
 type CaptureResult = { success: boolean; id: string };
 
@@ -153,6 +300,7 @@ async function handlePatientReport(
   };
   if (input.severity !== undefined) report.severity = input.severity;
   if (input.extractedInsights) report.extractedInsights = input.extractedInsights;
+  applyProvenance(report as Record<string, unknown>, input);
 
   await store.addPatientReport(report);
   return { success: true, id };
@@ -182,6 +330,7 @@ async function handleAgentLearning(
   };
   if (input.confidence !== undefined) learning.confidence = input.confidence;
   if (input.relatedHypotheses) learning.relatedHypotheses = input.relatedHypotheses;
+  applyProvenance(learning as Record<string, unknown>, input);
 
   await store.addAgentLearning(learning);
   return { success: true, id };
@@ -219,6 +368,7 @@ async function handleContradiction(
   if (input.finding2Method) contradiction.finding2Method = input.finding2Method;
   if (input.resolutionPlan) contradiction.resolutionPlan = input.resolutionPlan;
   if (input.diagnosticImpact) contradiction.diagnosticImpact = input.diagnosticImpact;
+  applyProvenance(contradiction as Record<string, unknown>, input);
 
   await store.addContradiction(contradiction);
   return { success: true, id };
@@ -254,6 +404,7 @@ async function handleLabResult(
   if (input.flag) lab.flag = input.flag;
   if (input.source) lab.source = input.source;
   if (input.notes) lab.notes = input.notes;
+  applyProvenance(lab as Record<string, unknown>, input);
 
   await store.addLabResult(lab);
   return { success: true, id };
@@ -288,6 +439,7 @@ async function handleTreatmentTrial(
   if (input.sideEffects) trial.sideEffects = input.sideEffects;
   if (input.reasonDiscontinued) trial.reasonDiscontinued = input.reasonDiscontinued;
   if (input.adequateTrial !== undefined) trial.adequateTrial = input.adequateTrial;
+  applyProvenance(trial as Record<string, unknown>, input);
 
   await store.addTreatmentTrial(trial);
   return { success: true, id };
@@ -327,6 +479,7 @@ async function handleConsultation(
   if (input.findings) consultation.findings = input.findings;
   if (input.conclusions) consultation.conclusions = input.conclusions;
   if (input.recommendations) consultation.recommendations = input.recommendations;
+  applyProvenance(consultation as Record<string, unknown>, input);
 
   await store.addConsultation(consultation);
   return { success: true, id };
@@ -350,20 +503,22 @@ export const captureDataTool = createTool({
   }),
   execute: async (input) => {
     const store = getClinicalStore();
+    // Re-parse through the discriminated union for precise per-type validation
+    const parsed = captureDataUnion.parse(input);
 
-    switch (input.type) {
+    switch (parsed.type) {
       case 'patient-report':
-        return handlePatientReport(store, input);
+        return handlePatientReport(store, parsed);
       case 'agent-learning':
-        return handleAgentLearning(store, input);
+        return handleAgentLearning(store, parsed);
       case 'contradiction':
-        return handleContradiction(store, input);
+        return handleContradiction(store, parsed);
       case 'lab-result':
-        return handleLabResult(store, input);
+        return handleLabResult(store, parsed);
       case 'treatment-trial':
-        return handleTreatmentTrial(store, input);
+        return handleTreatmentTrial(store, parsed);
       case 'consultation':
-        return handleConsultation(store, input);
+        return handleConsultation(store, parsed);
     }
   },
 });

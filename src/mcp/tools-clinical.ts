@@ -133,6 +133,32 @@ export function registerClinicalTools(server: McpServer): void {
           .array(z.string())
           .optional()
           .describe('[consultation] Specialist recommendations'),
+        // evidence provenance fields (apply to all types)
+        evidenceTier: z
+          .enum([
+            'T1-official',
+            'T1-specialist',
+            'T2-patient-reported',
+            'T3-ai-inferred',
+            'meta-analysis',
+            'RCT',
+            'cohort',
+            'case-series',
+            'case-report',
+            'expert-opinion',
+          ])
+          .optional()
+          .describe('Evidence tier classification'),
+        validationStatus: z
+          .enum(['unvalidated', 'confirmed', 'contradicted', 'critical-unvalidated'])
+          .optional()
+          .describe('Validation status against other evidence'),
+        sourceCredibility: z
+          .number()
+          .min(0)
+          .max(100)
+          .optional()
+          .describe('Source credibility score 0-100'),
       },
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
@@ -348,6 +374,15 @@ function gs(input: Record<string, unknown>, key: string): string {
   return input[key] as string;
 }
 
+function spreadProvenance(input: Record<string, unknown>): Record<string, unknown> {
+  const p: Record<string, unknown> = {};
+  if (g(input, 'evidenceTier')) p['evidenceTier'] = gs(input, 'evidenceTier');
+  if (g(input, 'validationStatus')) p['validationStatus'] = gs(input, 'validationStatus');
+  if (g(input, 'sourceCredibility') !== undefined)
+    p['sourceCredibility'] = g(input, 'sourceCredibility');
+  return p;
+}
+
 function buildCaptureReport(input: Record<string, unknown>, patientId: string): CaptureInput {
   return {
     type: 'patient-report',
@@ -364,7 +399,8 @@ function buildCaptureReport(input: Record<string, unknown>, patientId: string): 
     ...(g(input, 'extractedInsights')
       ? { extractedInsights: g(input, 'extractedInsights') as string[] }
       : {}),
-  };
+    ...spreadProvenance(input),
+  } as CaptureInput;
 }
 
 function buildCaptureLearning(input: Record<string, unknown>, patientId: string): CaptureInput {
@@ -386,7 +422,8 @@ function buildCaptureLearning(input: Record<string, unknown>, patientId: string)
     ...(g(input, 'relatedHypotheses')
       ? { relatedHypotheses: g(input, 'relatedHypotheses') as string[] }
       : {}),
-  };
+    ...spreadProvenance(input),
+  } as CaptureInput;
 }
 
 function buildCaptureContradiction(
@@ -404,7 +441,8 @@ function buildCaptureContradiction(
     ...(g(input, 'finding2Method') ? { finding2Method: gs(input, 'finding2Method') } : {}),
     ...(g(input, 'resolutionPlan') ? { resolutionPlan: gs(input, 'resolutionPlan') } : {}),
     ...(g(input, 'diagnosticImpact') ? { diagnosticImpact: gs(input, 'diagnosticImpact') } : {}),
-  };
+    ...spreadProvenance(input),
+  } as CaptureInput;
 }
 
 function buildCaptureLab(input: Record<string, unknown>, patientId: string): CaptureInput {
@@ -421,7 +459,8 @@ function buildCaptureLab(input: Record<string, unknown>, patientId: string): Cap
       : {}),
     ...(g(input, 'source') ? { source: gs(input, 'source') } : {}),
     ...(g(input, 'notes') ? { notes: gs(input, 'notes') } : {}),
-  };
+    ...spreadProvenance(input),
+  } as CaptureInput;
 }
 
 function buildCaptureTrial(input: Record<string, unknown>, patientId: string): CaptureInput {
@@ -448,7 +487,8 @@ function buildCaptureTrial(input: Record<string, unknown>, patientId: string): C
     ...(g(input, 'adequateTrial') !== undefined
       ? { adequateTrial: g(input, 'adequateTrial') as boolean }
       : {}),
-  };
+    ...spreadProvenance(input),
+  } as CaptureInput;
 }
 
 function buildCaptureConsultation(input: Record<string, unknown>, patientId: string): CaptureInput {
@@ -466,7 +506,8 @@ function buildCaptureConsultation(input: Record<string, unknown>, patientId: str
     ...(g(input, 'recommendations')
       ? { recommendations: g(input, 'recommendations') as string[] }
       : {}),
-  };
+    ...spreadProvenance(input),
+  } as CaptureInput;
 }
 
 function buildCaptureInput(input: Record<string, unknown>): CaptureInput {

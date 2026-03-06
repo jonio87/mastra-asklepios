@@ -58,6 +58,26 @@ export const clinicalDashboardSchema = z.object({
   recentPatientReport: z.string().optional(),
   // Latest PRO summary: "Pain 7/10 today, can't hold phone >2min, brain fog severe"
 
+  evidenceSummary: z
+    .object({
+      t1Claims: z.number().int().min(0),
+      t2Claims: z.number().int().min(0),
+      t3Claims: z.number().int().min(0),
+      contradictions: z.number().int().min(0),
+      unresolvedDiscrepancies: z.number().int().min(0),
+    })
+    .optional(),
+
+  dataCompleteness: z
+    .object({
+      hasT1Records: z.boolean(),
+      hasImaging: z.boolean(),
+      hasLabs: z.boolean(),
+      hasMedications: z.boolean(),
+      hasSpecialistNotes: z.boolean(),
+    })
+    .optional(),
+
   lastUpdated: z.string().optional(),
 });
 
