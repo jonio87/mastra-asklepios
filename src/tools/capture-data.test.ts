@@ -1,5 +1,4 @@
-import type { ClinicalStore } from '../storage/clinical-store.js';
-import { captureDataTool } from './capture-data.js';
+import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 
 const TEST_PATIENT = 'patient-capture-test';
 
@@ -8,31 +7,30 @@ const TEST_PATIENT = 'patient-capture-test';
  * Verifies discriminated-union routing for all 6 capture types.
  *
  * Uses an in-memory SQLite database for isolation.
+ *
+ * Strategy: create a real ClinicalStore by importing the class via @libsql/client
+ * (not from the mocked module), mock getClinicalStore() to return it.
  */
 
-// We need a store for verification queries — the tool uses getClinicalStore()
-// which defaults to the file-based DB, but we can verify via the tool's output.
-// For deeper verification, we query the same store the tool writes to.
-let store: ClinicalStore;
+// We create the store by directly constructing it — the ClinicalStore constructor
+// just calls createClient() with a URL, so we import the class indirectly.
+// biome-ignore lint/suspicious/noExplicitAny: test setup - building store outside mock
+let store: any;
 
-// Mock getClinicalStore to use in-memory store
 jest.mock('../storage/clinical-store.js', () => {
-  const actual = jest.requireActual<typeof import('../storage/clinical-store.js')>(
-    '../storage/clinical-store.js',
-  );
+  // biome-ignore lint/suspicious/noExplicitAny: test setup
+  const actual = jest.requireActual('../storage/clinical-store.js') as any;
   const memStore = new actual.ClinicalStore('file::memory:?cache=shared');
+  store = memStore;
   return {
     ...actual,
     getClinicalStore: () => memStore,
-    // biome-ignore lint/style/useNamingConvention: test export
-    _testStore: memStore,
   };
 });
 
+import { captureDataTool } from './capture-data.js';
+
 beforeAll(async () => {
-  // biome-ignore lint/suspicious/noExplicitAny: test helper access
-  const mod = jest.requireMock('../storage/clinical-store.js') as any;
-  store = mod._testStore;
   await store.ensureInitialized();
 });
 
@@ -77,7 +75,9 @@ describe('captureDataTool', () => {
 
       // Verify data was stored
       const reports = await store.queryPatientReports({ patientId: TEST_PATIENT });
-      const found = reports.find((r) => r.content === 'Erenumab had no effect after 3 months');
+      const found = reports.find(
+        (r: { content: string }) => r.content === 'Erenumab had no effect after 3 months',
+      );
       expect(found).toBeDefined();
       expect(found?.severity).toBe(8);
     });
@@ -125,7 +125,9 @@ describe('captureDataTool', () => {
       expect(result.success).toBe(true);
 
       const learnings = await store.queryLearnings({ patientId: TEST_PATIENT });
-      const found = learnings.find((l) => l.content.includes('WBC decline correlates'));
+      const found = learnings.find((l: { content: string }) =>
+        l.content.includes('WBC decline correlates'),
+      );
       expect(found).toBeDefined();
       expect(found?.confidence).toBe(65);
     });
@@ -183,7 +185,9 @@ describe('captureDataTool', () => {
       expect(result.success).toBe(true);
 
       const contradictions = await store.queryContradictions({ patientId: TEST_PATIENT });
-      const found = contradictions.find((c) => c.finding1.includes('WBC stable'));
+      const found = contradictions.find((c: { finding1: string }) =>
+        c.finding1.includes('WBC stable'),
+      );
       expect(found).toBeDefined();
       expect(found?.resolutionStatus).toBe('pending');
     });
@@ -199,7 +203,7 @@ describe('captureDataTool', () => {
       expect(result.success).toBe(true);
 
       const contradictions = await store.queryContradictions({ patientId: TEST_PATIENT });
-      const found = contradictions.find((c) => c.finding1 === 'Finding A');
+      const found = contradictions.find((c: { finding1: string }) => c.finding1 === 'Finding A');
       expect(found).toBeDefined();
       expect(found?.resolutionStatus).toBe('unresolved');
     });
@@ -243,7 +247,7 @@ describe('captureDataTool', () => {
         testName: 'CRP',
       });
       expect(labs.length).toBeGreaterThanOrEqual(1);
-      const found = labs.find((l) => l.source === 'Central Lab');
+      const found = labs.find((l: { source?: string }) => l.source === 'Central Lab');
       expect(found).toBeDefined();
       expect(found?.flag).toBe('normal');
     });
@@ -296,7 +300,7 @@ describe('captureDataTool', () => {
       expect(result.success).toBe(true);
 
       const trials = await store.queryTreatments({ patientId: TEST_PATIENT });
-      const found = trials.find((t) => t.medication === 'Pregabalin');
+      const found = trials.find((t: { medication: string }) => t.medication === 'Pregabalin');
       expect(found).toBeDefined();
       expect(found?.efficacy).toBe('minimal');
       expect(found?.drugClass).toBe('Anticonvulsant');

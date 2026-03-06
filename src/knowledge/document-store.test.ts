@@ -1,3 +1,5 @@
+import { jest } from '@jest/globals';
+
 /**
  * DocumentStore tests — mock @mastra/rag and @mastra/core to avoid
  * the ESM/CJS incompatibility with execa in Jest.

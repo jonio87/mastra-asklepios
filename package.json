@@ -27,7 +27,6 @@
     "check:fix": "npm run lint:fix && npm run typecheck && npm run test",
     "pre-commit": "npm run check",
     "mcp:stdio": "node --env-file=.env dist/mcp/stdio.js",
-    "mcp:http": "node --env-file=.env dist/mcp/http.js",
     "a2a": "node --env-file=.env dist/a2a/server.js",
     "serve": "node --env-file=.env dist/server.js"
   },

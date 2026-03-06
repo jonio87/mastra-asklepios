@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { mastra } from '../mastra.js';
+import { evidenceProvenanceFields } from '../schemas/clinical-record.js';
 import { captureDataTool } from '../tools/capture-data.js';
 import { ingestDocumentTool } from '../tools/ingest-document.js';
 import { knowledgeQueryTool } from '../tools/knowledge-query.js';
@@ -133,32 +134,8 @@ export function registerClinicalTools(server: McpServer): void {
           .array(z.string())
           .optional()
           .describe('[consultation] Specialist recommendations'),
-        // evidence provenance fields (apply to all types)
-        evidenceTier: z
-          .enum([
-            'T1-official',
-            'T1-specialist',
-            'T2-patient-reported',
-            'T3-ai-inferred',
-            'meta-analysis',
-            'RCT',
-            'cohort',
-            'case-series',
-            'case-report',
-            'expert-opinion',
-          ])
-          .optional()
-          .describe('Evidence tier classification'),
-        validationStatus: z
-          .enum(['unvalidated', 'confirmed', 'contradicted', 'critical-unvalidated'])
-          .optional()
-          .describe('Validation status against other evidence'),
-        sourceCredibility: z
-          .number()
-          .min(0)
-          .max(100)
-          .optional()
-          .describe('Source credibility score 0-100'),
+        // evidence provenance fields (apply to all types) — imported from clinical-record.ts
+        ...evidenceProvenanceFields,
       },
       annotations: { readOnlyHint: false, destructiveHint: false },
     },
@@ -383,225 +360,106 @@ function spreadProvenance(input: Record<string, unknown>): Record<string, unknow
   return p;
 }
 
-function buildCaptureReport(input: Record<string, unknown>, patientId: string): CaptureInput {
-  return {
-    type: 'patient-report',
-    patientId,
-    reportType: gs(input, 'reportType') as
-      | 'symptom-update'
-      | 'treatment-response'
-      | 'concern'
-      | 'goal'
-      | 'functional-status'
-      | 'self-observation',
-    content: gs(input, 'content'),
-    ...(g(input, 'severity') !== undefined ? { severity: g(input, 'severity') as number } : {}),
-    ...(g(input, 'extractedInsights')
-      ? { extractedInsights: g(input, 'extractedInsights') as string[] }
-      : {}),
-    ...spreadProvenance(input),
-  } as CaptureInput;
-}
+// ─── Per-type field definitions ─────────────────────────────────────
+// Each entry: source field → target field (or just field name if same).
+// Rename entries use { from, to } syntax.
 
-function buildCaptureLearning(input: Record<string, unknown>, patientId: string): CaptureInput {
-  return {
-    type: 'agent-learning',
-    patientId,
-    category: gs(input, 'category') as
-      | 'pattern-noticed'
-      | 'contradiction-found'
-      | 'treatment-insight'
-      | 'patient-behavior'
-      | 'temporal-correlation'
-      | 'diagnostic-clue'
-      | 'evidence-gap',
-    content: gs(input, 'content'),
-    ...(g(input, 'confidence') !== undefined
-      ? { confidence: g(input, 'confidence') as number }
-      : {}),
-    ...(g(input, 'relatedHypotheses')
-      ? { relatedHypotheses: g(input, 'relatedHypotheses') as string[] }
-      : {}),
-    ...spreadProvenance(input),
-  } as CaptureInput;
-}
+type FieldSpec = string | { from: string; to: string };
 
-function buildCaptureContradiction(
-  input: Record<string, unknown>,
-  patientId: string,
-): CaptureInput {
-  return {
-    type: 'contradiction',
-    patientId,
-    finding1: gs(input, 'finding1'),
-    finding2: gs(input, 'finding2'),
-    ...(g(input, 'finding1Date') ? { finding1Date: gs(input, 'finding1Date') } : {}),
-    ...(g(input, 'finding1Method') ? { finding1Method: gs(input, 'finding1Method') } : {}),
-    ...(g(input, 'finding2Date') ? { finding2Date: gs(input, 'finding2Date') } : {}),
-    ...(g(input, 'finding2Method') ? { finding2Method: gs(input, 'finding2Method') } : {}),
-    ...(g(input, 'resolutionPlan') ? { resolutionPlan: gs(input, 'resolutionPlan') } : {}),
-    ...(g(input, 'diagnosticImpact') ? { diagnosticImpact: gs(input, 'diagnosticImpact') } : {}),
-    ...spreadProvenance(input),
-  } as CaptureInput;
-}
+const captureFieldsByType: Record<string, FieldSpec[]> = {
+  'patient-report': ['reportType', 'content', 'severity', 'extractedInsights'],
+  'agent-learning': ['category', 'content', 'confidence', 'relatedHypotheses'],
+  contradiction: [
+    'finding1',
+    'finding2',
+    'finding1Date',
+    'finding1Method',
+    'finding2Date',
+    'finding2Method',
+    'resolutionPlan',
+    'diagnosticImpact',
+  ],
+  'lab-result': ['testName', 'value', 'unit', 'date', 'referenceRange', 'flag', 'source', 'notes'],
+  'treatment-trial': [
+    'medication',
+    'efficacy',
+    'drugClass',
+    'indication',
+    'startDate',
+    'endDate',
+    'dosage',
+    'sideEffects',
+    'reasonDiscontinued',
+    'adequateTrial',
+  ],
+  consultation: [
+    'provider',
+    'specialty',
+    'date',
+    'conclusionsStatus',
+    'institution',
+    'reason',
+    'findings',
+    'conclusions',
+    'recommendations',
+  ],
+};
 
-function buildCaptureLab(input: Record<string, unknown>, patientId: string): CaptureInput {
-  return {
-    type: 'lab-result',
-    patientId,
-    testName: gs(input, 'testName'),
-    value: g(input, 'value') as number | string,
-    unit: gs(input, 'unit'),
-    date: gs(input, 'date'),
-    ...(g(input, 'referenceRange') ? { referenceRange: gs(input, 'referenceRange') } : {}),
-    ...(g(input, 'flag')
-      ? { flag: gs(input, 'flag') as 'normal' | 'low' | 'high' | 'critical' }
-      : {}),
-    ...(g(input, 'source') ? { source: gs(input, 'source') } : {}),
-    ...(g(input, 'notes') ? { notes: gs(input, 'notes') } : {}),
-    ...spreadProvenance(input),
-  } as CaptureInput;
-}
+const queryFieldsByType: Record<string, FieldSpec[]> = {
+  labs: ['testName', 'dateFrom', 'dateTo', 'computeTrend'],
+  treatments: ['drugClass', { from: 'filterEfficacy', to: 'efficacy' }],
+  consultations: [
+    { from: 'filterSpecialty', to: 'specialty' },
+    { from: 'filterProvider', to: 'provider' },
+  ],
+  contradictions: ['status'],
+  'patient-history': ['recentDays'],
+};
 
-function buildCaptureTrial(input: Record<string, unknown>, patientId: string): CaptureInput {
-  return {
-    type: 'treatment-trial',
-    patientId,
-    medication: gs(input, 'medication'),
-    efficacy: gs(input, 'efficacy') as
-      | 'none'
-      | 'minimal'
-      | 'partial'
-      | 'significant'
-      | 'complete'
-      | 'unknown',
-    ...(g(input, 'drugClass') ? { drugClass: gs(input, 'drugClass') } : {}),
-    ...(g(input, 'indication') ? { indication: gs(input, 'indication') } : {}),
-    ...(g(input, 'startDate') ? { startDate: gs(input, 'startDate') } : {}),
-    ...(g(input, 'endDate') ? { endDate: gs(input, 'endDate') } : {}),
-    ...(g(input, 'dosage') ? { dosage: gs(input, 'dosage') } : {}),
-    ...(g(input, 'sideEffects') ? { sideEffects: g(input, 'sideEffects') as string[] } : {}),
-    ...(g(input, 'reasonDiscontinued')
-      ? { reasonDiscontinued: gs(input, 'reasonDiscontinued') }
-      : {}),
-    ...(g(input, 'adequateTrial') !== undefined
-      ? { adequateTrial: g(input, 'adequateTrial') as boolean }
-      : {}),
-    ...spreadProvenance(input),
-  } as CaptureInput;
-}
-
-function buildCaptureConsultation(input: Record<string, unknown>, patientId: string): CaptureInput {
-  return {
-    type: 'consultation',
-    patientId,
-    provider: gs(input, 'provider'),
-    specialty: gs(input, 'specialty'),
-    date: gs(input, 'date'),
-    conclusionsStatus: gs(input, 'conclusionsStatus') as 'documented' | 'unknown' | 'pending',
-    ...(g(input, 'institution') ? { institution: gs(input, 'institution') } : {}),
-    ...(g(input, 'reason') ? { reason: gs(input, 'reason') } : {}),
-    ...(g(input, 'findings') ? { findings: gs(input, 'findings') } : {}),
-    ...(g(input, 'conclusions') ? { conclusions: gs(input, 'conclusions') } : {}),
-    ...(g(input, 'recommendations')
-      ? { recommendations: g(input, 'recommendations') as string[] }
-      : {}),
-    ...spreadProvenance(input),
-  } as CaptureInput;
+/** Pick declared fields from flat MCP input into a typed object. */
+function pickFields(input: Record<string, unknown>, fields: FieldSpec[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const spec of fields) {
+    const from = typeof spec === 'string' ? spec : spec.from;
+    const to = typeof spec === 'string' ? spec : spec.to;
+    const v = g(input, from);
+    if (v !== undefined && v !== null) {
+      out[to] = v;
+    }
+  }
+  return out;
 }
 
 function buildCaptureInput(input: Record<string, unknown>): CaptureInput {
   const type = gs(input, 'type');
   const patientId = gs(input, 'patientId');
+  const fields = captureFieldsByType[type];
 
-  switch (type) {
-    case 'patient-report':
-      return buildCaptureReport(input, patientId);
-    case 'agent-learning':
-      return buildCaptureLearning(input, patientId);
-    case 'contradiction':
-      return buildCaptureContradiction(input, patientId);
-    case 'lab-result':
-      return buildCaptureLab(input, patientId);
-    case 'treatment-trial':
-      return buildCaptureTrial(input, patientId);
-    case 'consultation':
-      return buildCaptureConsultation(input, patientId);
-    default:
-      return {
-        type: 'patient-report',
-        patientId,
-        reportType: 'concern',
-        content: `Unknown: ${type}`,
-      };
+  if (!fields) {
+    return {
+      type: 'patient-report',
+      patientId,
+      reportType: 'concern',
+      content: `Unknown: ${type}`,
+    };
   }
-}
 
-function buildQueryLabs(input: Record<string, unknown>, patientId: string): QueryInput {
   return {
-    type: 'labs',
+    type,
     patientId,
-    ...(g(input, 'testName') ? { testName: gs(input, 'testName') } : {}),
-    ...(g(input, 'dateFrom') ? { dateFrom: gs(input, 'dateFrom') } : {}),
-    ...(g(input, 'dateTo') ? { dateTo: gs(input, 'dateTo') } : {}),
-    ...(g(input, 'computeTrend') !== undefined
-      ? { computeTrend: g(input, 'computeTrend') as boolean }
-      : {}),
-  };
-}
-
-function buildQueryTreatments(input: Record<string, unknown>, patientId: string): QueryInput {
-  return {
-    type: 'treatments',
-    patientId,
-    ...(g(input, 'drugClass') ? { drugClass: gs(input, 'drugClass') } : {}),
-    ...(g(input, 'filterEfficacy')
-      ? {
-          efficacy: gs(input, 'filterEfficacy') as
-            | 'none'
-            | 'minimal'
-            | 'partial'
-            | 'significant'
-            | 'complete'
-            | 'unknown',
-        }
-      : {}),
-  };
+    ...pickFields(input, fields),
+    ...spreadProvenance(input),
+  } as CaptureInput;
 }
 
 function buildQueryInput(input: Record<string, unknown>): QueryInput {
   const type = gs(input, 'type');
   const patientId = gs(input, 'patientId');
+  const fields = queryFieldsByType[type];
 
-  switch (type) {
-    case 'labs':
-      return buildQueryLabs(input, patientId);
-    case 'treatments':
-      return buildQueryTreatments(input, patientId);
-    case 'consultations':
-      return {
-        type: 'consultations',
-        patientId,
-        ...(g(input, 'filterSpecialty') ? { specialty: gs(input, 'filterSpecialty') } : {}),
-        ...(g(input, 'filterProvider') ? { provider: gs(input, 'filterProvider') } : {}),
-      };
-    case 'contradictions':
-      return {
-        type: 'contradictions',
-        patientId,
-        ...(g(input, 'status')
-          ? { status: gs(input, 'status') as 'unresolved' | 'pending' | 'resolved' }
-          : {}),
-      };
-    case 'patient-history':
-      return {
-        type: 'patient-history',
-        patientId,
-        ...(g(input, 'recentDays') !== undefined
-          ? { recentDays: g(input, 'recentDays') as number }
-          : {}),
-      };
-    default:
-      return { type: 'patient-history', patientId };
+  if (!fields) {
+    return { type: 'patient-history', patientId };
   }
+
+  return { type, patientId, ...pickFields(input, fields) } as QueryInput;
 }

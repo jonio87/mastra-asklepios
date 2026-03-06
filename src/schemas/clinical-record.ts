@@ -21,6 +21,13 @@ export const evidenceTierEnum = z.enum([
   'T1-specialist', // Specialist-confirmed findings
   'T2-patient-reported', // Patient self-report, informal notes
   'T3-ai-inferred', // AI hypotheses, literature synthesis
+  // Research quality tiers (used by research-agent evidence hierarchy)
+  'meta-analysis',
+  'RCT',
+  'cohort',
+  'case-series',
+  'case-report',
+  'expert-opinion',
 ]);
 
 export const validationStatusEnum = z.enum([
@@ -31,7 +38,7 @@ export const validationStatusEnum = z.enum([
 ]);
 
 /** Fields added to every clinical record type for evidence tracking */
-const evidenceProvenanceFields = {
+export const evidenceProvenanceFields = {
   evidenceTier: evidenceTierEnum.optional(),
   validationStatus: validationStatusEnum.optional(),
   sourceCredibility: z.number().int().min(0).max(100).optional(), // 0-100

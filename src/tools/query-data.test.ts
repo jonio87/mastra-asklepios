@@ -1,5 +1,4 @@
-import type { ClinicalStore } from '../storage/clinical-store.js';
-import { queryDataTool } from './query-data.js';
+import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 
 const TEST_PATIENT = 'patient-query-test';
 
@@ -8,31 +7,29 @@ const TEST_PATIENT = 'patient-query-test';
  * Verifies discriminated-union routing for all 5 query types.
  *
  * Seeds data via ClinicalStore, then queries via the tool to verify routing.
+ *
+ * Strategy: use jest.mock() with requireActual (untyped) to create an
+ * in-memory store, mock getClinicalStore() to return it.
  */
 
-let store: ClinicalStore;
+// biome-ignore lint/suspicious/noExplicitAny: test setup - building store outside mock
+let store: any;
 
-// Mock getClinicalStore to use in-memory store
 jest.mock('../storage/clinical-store.js', () => {
-  const actual = jest.requireActual<typeof import('../storage/clinical-store.js')>(
-    '../storage/clinical-store.js',
-  );
+  // biome-ignore lint/suspicious/noExplicitAny: test setup
+  const actual = jest.requireActual('../storage/clinical-store.js') as any;
   const memStore = new actual.ClinicalStore('file::memory:?cache=shared');
+  store = memStore;
   return {
     ...actual,
     getClinicalStore: () => memStore,
-    // biome-ignore lint/style/useNamingConvention: test export
-    _testStore: memStore,
   };
 });
 
-beforeAll(async () => {
-  // biome-ignore lint/suspicious/noExplicitAny: test helper access
-  const mod = jest.requireMock('../storage/clinical-store.js') as any;
-  store = mod._testStore;
-  await store.ensureInitialized();
+import { queryDataTool } from './query-data.js';
 
-  // Seed test data
+beforeAll(async () => {
+  await store.ensureInitialized();
   await seedTestData();
 });
 

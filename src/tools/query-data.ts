@@ -1,5 +1,6 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
+import type { EvidenceTier, ValidationStatus } from '../schemas/clinical-record.js';
 import type { ClinicalStore } from '../storage/clinical-store.js';
 import { getClinicalStore } from '../storage/clinical-store.js';
 import { logger } from '../utils/logger.js';
@@ -15,19 +16,19 @@ import { logger } from '../utils/logger.js';
 // ─── Provenance helper ──────────────────────────────────────────────
 
 interface ProvenanceOutput {
-  evidenceTier?: string;
-  validationStatus?: string;
+  evidenceTier?: EvidenceTier;
+  validationStatus?: ValidationStatus;
   sourceCredibility?: number;
 }
 
 function pickProvenance(row: {
-  evidenceTier?: string | undefined;
-  validationStatus?: string | undefined;
+  evidenceTier?: EvidenceTier | string | undefined;
+  validationStatus?: ValidationStatus | string | undefined;
   sourceCredibility?: number | undefined;
 }): ProvenanceOutput {
   const p: ProvenanceOutput = {};
-  if (row.evidenceTier) p.evidenceTier = row.evidenceTier;
-  if (row.validationStatus) p.validationStatus = row.validationStatus;
+  if (row.evidenceTier) p.evidenceTier = row.evidenceTier as EvidenceTier;
+  if (row.validationStatus) p.validationStatus = row.validationStatus as ValidationStatus;
   if (row.sourceCredibility !== undefined) p.sourceCredibility = row.sourceCredibility;
   return p;
 }

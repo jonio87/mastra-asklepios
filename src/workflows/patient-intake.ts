@@ -70,7 +70,7 @@ const reviewPhenotypesStep = createStep({
   execute: async ({ inputData, suspend, resumeData }) => {
     if (!resumeData) {
       const lowConfidence = inputData.phenotypes.filter((p) => p.confidence < 0.7);
-      const needsReview = lowConfidence.length > 0 || inputData.phenotypes.length > 0;
+      const needsReview = lowConfidence.length > 0;
 
       if (needsReview) {
         return suspend(

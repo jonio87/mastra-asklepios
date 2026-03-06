@@ -1,27 +1,12 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import type { EvidenceTier, ValidationStatus } from '../schemas/clinical-record.js';
+import { evidenceProvenanceFields } from '../schemas/clinical-record.js';
 import type { ClinicalStore } from '../storage/clinical-store.js';
 import { getClinicalStore } from '../storage/clinical-store.js';
 import { logger } from '../utils/logger.js';
 
-const provenanceFields = {
-  evidenceTier: z
-    .enum(['T1-official', 'T1-specialist', 'T2-patient-reported', 'T3-ai-inferred'])
-    .optional()
-    .describe('Evidence tier: T1-official, T1-specialist, T2-patient-reported, T3-ai-inferred'),
-  validationStatus: z
-    .enum(['unvalidated', 'confirmed', 'contradicted', 'critical-unvalidated'])
-    .optional()
-    .describe('Validation status against T1 data'),
-  sourceCredibility: z
-    .number()
-    .int()
-    .min(0)
-    .max(100)
-    .optional()
-    .describe('Source credibility 0-100'),
-};
+const provenanceFields = evidenceProvenanceFields;
 
 function applyProvenance(
   record: Record<string, unknown>,
