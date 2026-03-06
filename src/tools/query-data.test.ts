@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
+import { ClinicalStore } from '../storage/clinical-store.js';
 
 const TEST_PATIENT = 'patient-query-test';
 
@@ -8,27 +9,25 @@ const TEST_PATIENT = 'patient-query-test';
  *
  * Seeds data via ClinicalStore, then queries via the tool to verify routing.
  *
- * Strategy: use jest.mock() with requireActual (untyped) to create an
- * in-memory store, mock getClinicalStore() to return it.
+ * Strategy: import the real ClinicalStore class directly, create an
+ * in-memory store, then use jest.unstable_mockModule to intercept
+ * getClinicalStore() so the tool reads from our in-memory store.
+ * The tool module is dynamically imported AFTER the mock is registered.
  */
 
-// biome-ignore lint/suspicious/noExplicitAny: test setup - building store outside mock
-let store: any;
+const store = new ClinicalStore('file::memory:?cache=shared');
 
-jest.mock('../storage/clinical-store.js', () => {
-  // biome-ignore lint/suspicious/noExplicitAny: test setup
-  const actual = jest.requireActual('../storage/clinical-store.js') as any;
-  const memStore = new actual.ClinicalStore('file::memory:?cache=shared');
-  store = memStore;
-  return {
-    ...actual,
-    getClinicalStore: () => memStore,
-  };
-});
+jest.unstable_mockModule('../storage/clinical-store.js', () => ({
+  ClinicalStore,
+  getClinicalStore: () => store,
+}));
 
-import { queryDataTool } from './query-data.js';
+// biome-ignore lint/suspicious/noExplicitAny: dynamically imported in beforeAll
+let queryDataTool: any;
 
 beforeAll(async () => {
+  const mod = await import('./query-data.js');
+  queryDataTool = mod.queryDataTool;
   await store.ensureInitialized();
   await seedTestData();
 });
@@ -242,7 +241,6 @@ describe('queryDataTool', () => {
       // biome-ignore lint/suspicious/noExplicitAny: test assertion
       const data = result.data as any;
       expect(data.trend).toBeDefined();
-      // WBC went 3.5 → 4.37 → 2.59, so trend is fluctuating (up then down)
       expect(data.trend.direction).toBe('fluctuating');
       expect(data.trend.latestValue).toBe(2.59);
       expect(data.trend.isAbnormal).toBe(true);
@@ -378,7 +376,7 @@ describe('queryDataTool', () => {
 
       // biome-ignore lint/suspicious/noExplicitAny: test assertion
       const data = result.data as any;
-      expect(data.missingConclusions).toBe(1); // Prof. Zakrzewska has unknown status
+      expect(data.missingConclusions).toBe(1);
     });
   });
 
@@ -501,7 +499,6 @@ describe('queryDataTool', () => {
 
       // biome-ignore lint/suspicious/noExplicitAny: test assertion
       const data = result.data as any;
-      // Reports from today should still appear
       expect(data.recentReports.length).toBeGreaterThanOrEqual(1);
     });
   });

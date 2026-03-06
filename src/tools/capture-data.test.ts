@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
+import { ClinicalStore } from '../storage/clinical-store.js';
 
 const TEST_PATIENT = 'patient-capture-test';
 
@@ -8,34 +9,30 @@ const TEST_PATIENT = 'patient-capture-test';
  *
  * Uses an in-memory SQLite database for isolation.
  *
- * Strategy: create a real ClinicalStore by importing the class via @libsql/client
- * (not from the mocked module), mock getClinicalStore() to return it.
+ * Strategy: import the real ClinicalStore class directly, create an
+ * in-memory store, then use jest.unstable_mockModule to intercept
+ * getClinicalStore() so the tool writes to our in-memory store.
+ * The tool module is dynamically imported AFTER the mock is registered.
  */
 
-// We create the store by directly constructing it — the ClinicalStore constructor
-// just calls createClient() with a URL, so we import the class indirectly.
-// biome-ignore lint/suspicious/noExplicitAny: test setup - building store outside mock
-let store: any;
+const memStore = new ClinicalStore('file::memory:?cache=shared');
 
-jest.mock('../storage/clinical-store.js', () => {
-  // biome-ignore lint/suspicious/noExplicitAny: test setup
-  const actual = jest.requireActual('../storage/clinical-store.js') as any;
-  const memStore = new actual.ClinicalStore('file::memory:?cache=shared');
-  store = memStore;
-  return {
-    ...actual,
-    getClinicalStore: () => memStore,
-  };
-});
+jest.unstable_mockModule('../storage/clinical-store.js', () => ({
+  ClinicalStore,
+  getClinicalStore: () => memStore,
+}));
 
-import { captureDataTool } from './capture-data.js';
+// biome-ignore lint/suspicious/noExplicitAny: dynamically imported in beforeAll
+let captureDataTool: any;
 
 beforeAll(async () => {
-  await store.ensureInitialized();
+  const mod = await import('./capture-data.js');
+  captureDataTool = mod.captureDataTool;
+  await memStore.ensureInitialized();
 });
 
 afterAll(async () => {
-  await store.close();
+  await memStore.close();
 });
 
 describe('captureDataTool', () => {
@@ -73,11 +70,8 @@ describe('captureDataTool', () => {
       expect(result.success).toBe(true);
       expect(result.id).toMatch(/^pro-/);
 
-      // Verify data was stored
-      const reports = await store.queryPatientReports({ patientId: TEST_PATIENT });
-      const found = reports.find(
-        (r: { content: string }) => r.content === 'Erenumab had no effect after 3 months',
-      );
+      const reports = await memStore.queryPatientReports({ patientId: TEST_PATIENT });
+      const found = reports.find((r) => r.content === 'Erenumab had no effect after 3 months');
       expect(found).toBeDefined();
       expect(found?.severity).toBe(8);
     });
@@ -124,10 +118,8 @@ describe('captureDataTool', () => {
 
       expect(result.success).toBe(true);
 
-      const learnings = await store.queryLearnings({ patientId: TEST_PATIENT });
-      const found = learnings.find((l: { content: string }) =>
-        l.content.includes('WBC decline correlates'),
-      );
+      const learnings = await memStore.queryLearnings({ patientId: TEST_PATIENT });
+      const found = learnings.find((l) => l.content.includes('WBC decline correlates'));
       expect(found).toBeDefined();
       expect(found?.confidence).toBe(65);
     });
@@ -184,10 +176,8 @@ describe('captureDataTool', () => {
 
       expect(result.success).toBe(true);
 
-      const contradictions = await store.queryContradictions({ patientId: TEST_PATIENT });
-      const found = contradictions.find((c: { finding1: string }) =>
-        c.finding1.includes('WBC stable'),
-      );
+      const contradictions = await memStore.queryContradictions({ patientId: TEST_PATIENT });
+      const found = contradictions.find((c) => c.finding1.includes('WBC stable'));
       expect(found).toBeDefined();
       expect(found?.resolutionStatus).toBe('pending');
     });
@@ -202,8 +192,8 @@ describe('captureDataTool', () => {
 
       expect(result.success).toBe(true);
 
-      const contradictions = await store.queryContradictions({ patientId: TEST_PATIENT });
-      const found = contradictions.find((c: { finding1: string }) => c.finding1 === 'Finding A');
+      const contradictions = await memStore.queryContradictions({ patientId: TEST_PATIENT });
+      const found = contradictions.find((c) => c.finding1 === 'Finding A');
       expect(found).toBeDefined();
       expect(found?.resolutionStatus).toBe('unresolved');
     });
@@ -242,12 +232,12 @@ describe('captureDataTool', () => {
 
       expect(result.success).toBe(true);
 
-      const labs = await store.queryLabs({
+      const labs = await memStore.queryLabs({
         patientId: TEST_PATIENT,
         testName: 'CRP',
       });
       expect(labs.length).toBeGreaterThanOrEqual(1);
-      const found = labs.find((l: { source?: string }) => l.source === 'Central Lab');
+      const found = labs.find((l) => l.source === 'Central Lab');
       expect(found).toBeDefined();
       expect(found?.flag).toBe('normal');
     });
@@ -299,8 +289,8 @@ describe('captureDataTool', () => {
 
       expect(result.success).toBe(true);
 
-      const trials = await store.queryTreatments({ patientId: TEST_PATIENT });
-      const found = trials.find((t: { medication: string }) => t.medication === 'Pregabalin');
+      const trials = await memStore.queryTreatments({ patientId: TEST_PATIENT });
+      const found = trials.find((t) => t.medication === 'Pregabalin');
       expect(found).toBeDefined();
       expect(found?.efficacy).toBe('minimal');
       expect(found?.drugClass).toBe('Anticonvulsant');
@@ -360,7 +350,7 @@ describe('captureDataTool', () => {
 
       expect(result.success).toBe(true);
 
-      const consultations = await store.queryConsultations({
+      const consultations = await memStore.queryConsultations({
         patientId: TEST_PATIENT,
         provider: 'Dr. Smith',
       });
