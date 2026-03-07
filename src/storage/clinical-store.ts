@@ -175,7 +175,25 @@ export class ClinicalStore {
 
   async addLabResult(lab: LabResult): Promise<void> {
     await this.ensureInitialized();
-    await this.client.execute({
+    await this.client.execute(this.labResultStatement(lab));
+  }
+
+  async addLabResultsBatch(labs: LabResult[]): Promise<{ inserted: number }> {
+    await this.ensureInitialized();
+    if (labs.length === 0) return { inserted: 0 };
+
+    const stmts = labs.map((lab) => this.labResultStatement(lab));
+
+    // LibSQL batch in chunks of 100 (atomic per chunk)
+    for (let i = 0; i < stmts.length; i += 100) {
+      await this.client.batch(stmts.slice(i, i + 100), 'write');
+    }
+
+    return { inserted: labs.length };
+  }
+
+  private labResultStatement(lab: LabResult) {
+    return {
       sql: `INSERT OR REPLACE INTO clinical_lab_results
                 (id, patient_id, test_name, value, unit, reference_range, flag, date, source, notes,
                  evidence_tier, validation_status, source_credibility)
@@ -195,7 +213,7 @@ export class ClinicalStore {
         lab.validationStatus ?? null,
         lab.sourceCredibility ?? null,
       ],
-    });
+    };
   }
 
   async queryLabs(params: {

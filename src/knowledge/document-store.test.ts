@@ -59,7 +59,7 @@ function createMockVector() {
   const stored: StoredEntry[] = [];
 
   return {
-    listIndexes: jest.fn(async () => ['asklepios-documents']),
+    listIndexes: jest.fn(async () => ['asklepios_documents']),
     createIndex: jest.fn(async () => undefined),
     upsert: jest.fn(async (params: StoredEntry) => {
       stored.push(params);
@@ -164,7 +164,7 @@ describe('DocumentStore', () => {
 
     await store.ingestDocument('Test content', { patientId: 'p1', documentType: 'other' });
     expect(vector.createIndex).toHaveBeenCalledWith({
-      indexName: 'asklepios-documents',
+      indexName: 'asklepios_documents',
       dimension: 1536,
       metric: 'cosine',
     });
