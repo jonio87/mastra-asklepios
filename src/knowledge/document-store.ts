@@ -39,7 +39,7 @@ export interface DocumentChunk {
   score?: number;
 }
 
-const INDEX_NAME = 'asklepios-documents';
+const INDEX_NAME = 'asklepios_documents';
 const EMBEDDING_DIMENSION = 1536; // text-embedding-3-small
 
 export class DocumentStore {
