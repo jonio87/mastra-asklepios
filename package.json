@@ -28,7 +28,8 @@
     "pre-commit": "npm run check",
     "mcp:stdio": "node --env-file=.env dist/mcp/stdio.js",
     "a2a": "node --env-file=.env dist/a2a/server.js",
-    "serve": "node --env-file=.env dist/server.js"
+    "serve": "node --env-file=.env dist/server.js",
+    "import:records": "npx tsx scripts/import-records.ts"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -47,6 +48,7 @@
     "express": "^5.2.1",
     "ink": "^6.8.0",
     "react": "^19.2.4",
+    "yaml": "^2.8.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {
