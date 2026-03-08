@@ -8,6 +8,10 @@
         "ASKLEPIOS_AUTH": "claude-code",
         "NODE_ENV": "development"
       }
+    },
+    "biomcp": {
+      "command": "uvx",
+      "args": ["biomcp", "run"]
     }
   }
 }
