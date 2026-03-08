@@ -40,12 +40,33 @@ describe('pubmedSearchTool', () => {
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing query', () => {
+  it('accepts empty input for PMID-only modes', () => {
     const result = pubmedSearchTool.inputSchema.safeParse({});
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 
-  it('validates output schema with valid data', () => {
+  it('validates PMID lookup input', () => {
+    const result = pubmedSearchTool.inputSchema.safeParse({
+      pmid: '18549410',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('validates batch PMID lookup input', () => {
+    const result = pubmedSearchTool.inputSchema.safeParse({
+      pmids: ['18549410', '34312221', '28025837'],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('validates citedBy lookup input', () => {
+    const result = pubmedSearchTool.inputSchema.safeParse({
+      citedByPmid: '18549410',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('validates output schema with full article data', () => {
     const result = pubmedSearchTool.outputSchema.safeParse({
       articles: [
         {
@@ -56,6 +77,8 @@ describe('pubmedSearchTool', () => {
           journal: 'Nature',
           publicationDate: '2026-01',
           url: 'https://pubmed.ncbi.nlm.nih.gov/12345678/',
+          meshTerms: ['Headache', 'Trigeminal Nerve'],
+          publicationType: ['Journal Article', 'Review'],
         },
       ],
       totalCount: 1,
@@ -64,7 +87,7 @@ describe('pubmedSearchTool', () => {
     expect(result.success).toBe(true);
   });
 
-  it('validates output with optional doi', () => {
+  it('validates output with optional fields omitted', () => {
     const result = pubmedSearchTool.outputSchema.safeParse({
       articles: [
         {

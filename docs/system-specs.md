@@ -2,8 +2,8 @@
 
 > Rare Disease Research Agent with Diagnostic Odyssey Compression
 
-**Version:** 0.3.0
-**Status:** Core implementation complete + Phase 8 enhancements + Ink TUI (split-pane terminal interface)
+**Version:** 0.4.0
+**Status:** Core implementation + Phase 8 enhancements + Ink TUI + Phase 9 medical research validation tools
 
 ---
 
@@ -37,19 +37,34 @@ The killer feature is **Cross-Patient Observational Memory** — powered by Mast
 
 ```
 src/
-├── agents/                    # 5 specialized agents
-│   ├── asklepios.ts           # Central orchestrator (8 tools, all routing)
-│   ├── research-agent.ts      # Literature search specialist (4 tools)
+├── agents/                    # 9 specialized agents
+│   ├── asklepios.ts           # Central orchestrator (5 tools + network routing to 8 sub-agents)
+│   ├── research-agent.ts      # Literature search specialist (7 tools)
 │   ├── phenotype-agent.ts     # HPO symptom mapping specialist (2 tools)
+│   ├── hypothesis-agent.ts    # Hypothesis generation with tier-weighted scoring (3 tools)
 │   ├── synthesis-agent.ts     # Evidence synthesis & hypothesis ranking (no tools, pure reasoning)
+│   ├── interview-agent.ts     # Diagnostic interview questions (3 tools)
+│   ├── followup-agent.ts      # Follow-up question generation (2 tools)
+│   ├── report-agent.ts        # Three-register deliverables (3 tools)
 │   └── brain-agent.ts         # Cross-patient intelligence (no tools, pure reasoning)
-├── tools/                     # 8 external API integrations (6 core + 2 brain)
-│   ├── pubmed-search.ts       # NCBI PubMed eUtils API (rate-limited)
+├── tools/                     # 17 tool integrations
+│   ├── pubmed-search.ts       # NCBI PubMed eUtils API — 4 modes: keyword, PMID lookup, batch, citedBy
 │   ├── clinvar-lookup.ts      # NCBI ClinVar variant pathogenicity database
 │   ├── orphanet-lookup.ts     # Orphanet rare disease database
 │   ├── hpo-mapper.ts          # Human Phenotype Ontology API
 │   ├── document-parser.ts     # Medical document extraction (local)
-│   └── deep-research.ts       # Multi-source research synthesis (PubMed + OMIM)
+│   ├── deep-research.ts       # Multi-source research synthesis (PubMed + OMIM)
+│   ├── clinical-trials.ts     # ClinicalTrials.gov API v2 (search + NCT ID lookup) [Phase 9]
+│   ├── openfda-lookup.ts      # OpenFDA drug adverse events + labeling [Phase 9]
+│   ├── evidence-search.ts     # Cochrane/systematic review evidence search with PICO [Phase 9]
+│   ├── ddx-generator.ts       # Differential diagnosis generator (Isabel API + pattern matching) [Phase 9]
+│   ├── capture-data.ts        # Write structured clinical records
+│   ├── query-data.ts          # Read structured clinical records
+│   ├── knowledge-query.ts     # Semantic search over documents
+│   ├── brain-feed.ts          # Feed anonymized observations to brain
+│   ├── brain-recall.ts        # Query cross-patient patterns
+│   ├── parallel-research.ts   # Parallel.ai ultra-deep research
+│   └── adversarial-synthesis.ts # Three-perspective adversarial analysis
 ├── workflows/                 # 2 multi-step orchestration pipelines
 │   ├── patient-intake.ts      # Document → parse → phenotype → review
 │   └── diagnostic-research.ts # Parallel research → synthesis → hypotheses
@@ -59,10 +74,14 @@ src/
 │   └── pii-redactor.ts        # HIPAA-compliant PII redaction
 ├── mcp/                       # MCP server — full AI-testable control plane
 │   ├── server.ts              # Thin orchestrator (calls register functions)
-│   ├── tools-core.ts          # 5 core tools (chat, search, lookup, map, recall)
-│   ├── tools-agents.ts        # 4 agent invocation tools
+│   ├── tools-core.ts          # 6 core tools (chat, search, lookup, map, recall)
+│   ├── tools-agents.ts        # 8 agent invocation tools
 │   ├── tools-workflows.ts     # 3 workflow execution + resume tools
 │   ├── tools-state.ts         # 5 state inspection + raw tool access
+│   ├── tools-validation.ts    # 4 validation tools (clinical trials, OpenFDA, evidence, DDx) [Phase 9]
+│   ├── tools-research.ts      # 2 advanced research tools (parallel, adversarial)
+│   ├── tools-clinical.ts      # 4 clinical data tools
+│   ├── tools-tasks.ts         # 2 task-based tools for long-running operations
 │   ├── resources.ts           # 7 resources (patient, system, agent)
 │   ├── prompts.ts             # 4 prompts (diagnostic workflows, testing)
 │   └── stdio.ts               # StdioServerTransport entry point
@@ -98,13 +117,17 @@ src/
 
 | Agent | Role | Tools | Model |
 |-------|------|-------|-------|
-| **Asklepios** | Central orchestrator; routes to sub-agents, coordinates research; supports network mode for multi-agent delegation | pubmedSearch, orphanetLookup, hpoMapper, documentParser, deepResearch, brainRecall, brainFeed, clinvarLookup | Dynamic (Haiku/Sonnet/Opus via model router) |
-| **Research Agent** | Deep literature search across medical databases | pubmedSearch, orphanetLookup, deepResearch, clinvarLookup | claude-sonnet-4 |
+| **Asklepios** | Central orchestrator; routes to 8 sub-agents via network mode | captureData, queryData, knowledgeQuery, brainRecall, brainFeed | Dynamic (Haiku/Sonnet/Opus via model router) |
+| **Research Agent** | Literature search across 7 medical databases | pubmedSearch, orphanetLookup, clinvarLookup, deepResearch, clinicalTrials, openfdaLookup, evidenceSearch | claude-sonnet-4 |
 | **Phenotype Agent** | Symptom extraction & HPO term standardization | hpoMapper, documentParser | claude-sonnet-4 |
+| **Hypothesis Agent** | Preliminary hypothesis generation with tier-weighted scoring + independent DDx | queryData, captureData, knowledgeQuery, ddxGenerator | claude-sonnet-4 |
+| **Interview Agent** | Diagnostic interview question generation from evidence gaps | queryData, captureData, knowledgeQuery | claude-sonnet-4 |
+| **Followup Agent** | Follow-up question generation | queryData, captureData | claude-sonnet-4 |
+| **Report Agent** | Three-register deliverables (technical, accessible, structured) | queryData, captureData, brainFeed | claude-sonnet-4 |
 | **Synthesis Agent** | Evidence synthesis, hypothesis ranking, self-reflection | _(none — pure reasoning)_ | claude-sonnet-4 |
 | **Brain Agent** | Cross-patient pattern recognition, differential reasoning | _(none — pure reasoning)_ | claude-sonnet-4 |
 
-All agents share a single Memory instance with cross-patient observational learning.
+All 9 agents share a single Memory instance with cross-patient observational learning.
 
 ### Brain Agent (Cross-Patient Intelligence)
 
@@ -120,11 +143,15 @@ Asklepios supports **network mode** via Mastra's `agent.network()` API. In netwo
 | Sub-Agent | When Routed To |
 |-----------|---------------|
 | phenotype-agent | Extracting symptoms from documents, mapping to HPO terms |
-| research-agent | Literature searches in PubMed, Orphanet, deep research |
+| research-agent | Literature searches: PubMed, ClinVar, ClinicalTrials.gov, OpenFDA, Cochrane, Orphanet |
+| hypothesis-agent | Generating preliminary hypothesis set with tier-weighted confidence |
+| interview-agent | Generating diagnostic interview questions from evidence gaps |
 | synthesis-agent | Combining evidence into ranked diagnostic hypotheses |
+| followup-agent | Generating follow-up questions |
+| report-agent | Creating deliverables in technical/accessible/structured format |
 | asklepios-brain | Cross-patient pattern matching and wisdom recall |
 
-**Routing strategy**: phenotype extraction → brain recall → research → synthesis → brain feed
+**Routing strategy**: phenotype extraction → brain recall → research → hypothesis → interview → synthesis → followup → report → brain feed
 
 Toggle network mode in the CLI with `/network`. The `[net]` indicator appears in the prompt when active.
 
@@ -162,14 +189,85 @@ Schema-based structured state for each patient using `patientProfileSchema` (Zod
 ---
 ## Tools
 
+### Core Research Tools (7)
+
 | Tool | Data Source | Purpose |
 |------|-----------|---------| 
-| `pubmedSearch` | NCBI eUtils API | Search medical literature (articles, case reports, trials) |
+| `pubmedSearch` | NCBI eUtils API | Search medical literature — 4 modes: keyword search, PMID lookup, batch PMID verification, citedBy queries. Returns full abstracts, MeSH terms, publication types via efetch. |
 | `clinvarLookup` | NCBI ClinVar API | Look up genetic variant pathogenicity, clinical significance, review status |
 | `orphanetLookup` | Orphanet API | Rare disease database lookup (genes, inheritance, prevalence) |
+| `deepResearch` | PubMed + OMIM | Multi-source research synthesis with evidence levels and gap analysis |
+| `clinicalTrials` | ClinicalTrials.gov API v2 | Search clinical trials by condition, intervention, phase, status, country; NCT ID lookup [Phase 9] |
+| `openfdaLookup` | OpenFDA API | Drug adverse event reports (FAERS), drug labeling, reaction-specific counts [Phase 9] |
+| `evidenceSearch` | PubMed + Cochrane | Systematic review/RCT/meta-analysis search with PICO-structured queries [Phase 9] |
+
+### Phenotype & Knowledge Tools (3)
+
+| Tool | Data Source | Purpose |
+|------|-----------|---------| 
 | `hpoMapper` | HPO API | Map free-text symptoms → standardized HPO terms with confidence |
 | `documentParser` | Local processing | Parse medical documents → structured data (sections, labs, demographics) |
-| `deepResearch` | PubMed + OMIM | Multi-source research synthesis with evidence levels and gap analysis |
+| `knowledgeQuery` | Local vector store | Semantic search over ingested documents |
+
+### Clinical Data Tools (2)
+
+| Tool | Data Source | Purpose |
+|------|-----------|---------| 
+| `captureData` | Local storage | Write structured clinical records (patient-report, lab-result, treatment-trial, etc.) |
+| `queryData` | Local storage | Read structured clinical records |
+
+### Brain Tools (2)
+
+| Tool | Data Source | Purpose |
+|------|-----------|---------| 
+| `brainFeed` | Local storage | Feed anonymized case observations to cross-patient brain |
+| `brainRecall` | Local storage | Query cross-patient diagnostic patterns |
+
+### Advanced Research Tools (3)
+
+| Tool | Data Source | Purpose |
+|------|-----------|---------| 
+| `parallelResearch` | Parallel.ai API | Ultra-deep research with advocate/skeptic/unbiased framing |
+| `adversarialSynthesis` | Internal | Three-perspective adversarial analysis |
+| `ddxGenerator` | Isabel API + internal | Differential diagnosis generator with pattern matching fallback [Phase 9] |
+
+### Phase 9: Medical Research Validation Tools
+
+Four new tools added to strengthen evidence-based validation:
+
+**ClinicalTrials.gov v2** (`src/tools/clinical-trials.ts`)
+- **API**: `https://clinicaltrials.gov/api/v2/studies` (REST, no auth required)
+- **Modes**: Search by condition/intervention/phase/status/country, or lookup by NCT ID
+- **Output**: Study title, phase, status, enrollment, conditions, interventions, dates, NCT ID
+- **Agent**: research-agent
+
+**OpenFDA Drug Safety** (`src/tools/openfda-lookup.ts`)
+- **API**: `https://api.fda.gov/drug/event.json` and `/drug/label.json`
+- **Modes**: Adverse event search (top-N reactions by drug), drug label lookup, reaction-specific counting
+- **Output**: Reaction terms with report counts, safety signal detection
+- **Agent**: research-agent
+- **API key**: Optional `OPENFDA_API_KEY` (40 req/min without, 240/min with)
+
+**Evidence Search** (`src/tools/evidence-search.ts`)
+- **API**: NCBI eUtils with publication type filters + Cochrane via PubMed
+- **Features**: PICO-structured queries, evidence type filtering (systematic reviews, RCTs, meta-analyses, guidelines, case reports)
+- **Output**: Evidence items with quality scores, evidence types, PICO components
+- **Agent**: research-agent
+
+**DDx Generator** (`src/tools/ddx-generator.ts`)
+- **API**: Isabel Healthcare API (optional, requires `ISABELDX_API_KEY`) + internal pattern matching
+- **Features**: Symptom-to-diagnosis mapping, prevalence weighting, "don't miss" flags, age/sex/region filtering
+- **Output**: Ranked differential diagnoses with likelihood scores
+- **Agent**: hypothesis-agent + MCP `generate_ddx`
+
+### PubMed Enhancement (Phase 9)
+
+The `pubmedSearchTool` was significantly enhanced:
+- **efetch integration**: Full abstracts retrieved via `efetch.fcgi?rettype=xml` (previously empty string)
+- **PMID lookup mode**: Verify a single PMID exists, return title + abstract + MeSH terms
+- **Batch PMID mode**: Verify multiple PMIDs in one call (batches of 200)
+- **citedBy mode**: Find articles citing a given PMID via `elink.fcgi?linkname=pubmed_pubmed_citedin`
+- **XML parsing**: Full PubmedArticle XML parsing with abstract, MeSH, publication type, DOI extraction
 
 ### ClinVar Integration (Phase 8)
 
@@ -189,10 +287,10 @@ The `deepResearch` tool now includes real OMIM API integration (previously stub)
 
 ### NCBI Rate Limiting (Phase 8)
 
-All NCBI eUtils calls (PubMed + ClinVar) go through a shared rate limiter (`src/utils/ncbi-rate-limiter.ts`):
+All NCBI eUtils calls (PubMed + ClinVar + evidence search) go through a shared rate limiter (`src/utils/ncbi-rate-limiter.ts`):
 - **Exponential backoff**: 1s → 2s → 4s → 8s → 16s on 429/500 responses (max 5 retries)
 - **API key support**: Set `NCBI_API_KEY` env var to increase rate limit from 3 to 10 req/sec
-- **Shared singleton**: All tools share one limiter to prevent cross-tool rate limit collisions
+- **Shared singleton**: All NCBI tools share one limiter to prevent cross-tool rate limit collisions
 - **No retry on 400**: Client errors fail immediately without retry
 
 ---
@@ -328,24 +426,36 @@ src/mcp/
 └── server.test.ts     # Registration tests (mocks @mastra/core)
 ```
 
-### Tools (20)
+### Tools (37+)
 
 #### Core Tools (6)
 | Tool | Annotations | Description |
 |------|-------------|-------------|
 | `ask_asklepios` | `readOnlyHint: false` | Chat with the Asklepios orchestrator agent |
-| `search_pubmed` | `readOnlyHint: true` | Search PubMed for medical literature |
+| `search_pubmed` | `readOnlyHint: true` | Search PubMed — supports keyword, PMID lookup, batch verification, citedBy |
 | `lookup_orphanet` | `readOnlyHint: true` | Look up rare disease in Orphanet |
 | `lookup_clinvar` | `readOnlyHint: true` | Look up genetic variants in ClinVar (pathogenicity, review status) |
 | `map_symptoms` | `readOnlyHint: true` | Map free-text symptoms to HPO terms |
 | `recall_brain` | `readOnlyHint: true` | Query cross-patient intelligence |
 
-#### Agent Invocation Tools (4)
+#### Validation Tools (4) [Phase 9]
+| Tool | Annotations | Description |
+|------|-------------|-------------|
+| `search_clinical_trials` | `readOnlyHint: true` | Search ClinicalTrials.gov v2 by condition, intervention, phase, status, country; NCT ID lookup |
+| `lookup_openfda` | `readOnlyHint: true` | Search OpenFDA for drug adverse events (FAERS) and drug labeling |
+| `search_evidence` | `readOnlyHint: true` | Search for systematic reviews, meta-analyses, RCTs with PICO queries |
+| `generate_ddx` | `readOnlyHint: true` | Generate differential diagnosis from clinical features |
+
+#### Agent Invocation Tools (8)
 | Tool | Input | Description |
 |------|-------|-------------|
 | `invoke_phenotype_agent` | `message`, `patientId?`, `threadId?` | Invoke phenotype agent for symptom extraction + HPO mapping |
 | `invoke_research_agent` | `message`, `patientId?`, `threadId?` | Invoke research agent for literature search |
 | `invoke_synthesis_agent` | `message`, `patientId?`, `threadId?` | Invoke synthesis agent for hypothesis generation |
+| `invoke_hypothesis_agent` | `message`, `patientId?`, `threadId?` | Invoke hypothesis agent for tier-weighted hypothesis generation |
+| `invoke_interview_agent` | `message`, `patientId?`, `threadId?` | Invoke interview agent for diagnostic questions |
+| `invoke_followup_agent` | `message`, `patientId?`, `threadId?` | Invoke followup agent for follow-up questions |
+| `invoke_report_agent` | `message`, `patientId?`, `threadId?` | Invoke report agent for deliverable generation |
 | `invoke_brain_agent` | `message` | Invoke brain agent for cross-patient pattern matching |
 
 #### Workflow Execution Tools (3)
@@ -383,7 +493,7 @@ Long-running operations that return a task ID immediately, allowing clients to p
 | Patient Timeline | `patient://{id}/timeline` | Template | Conversation history (last 5 threads) |
 | Agent Config | `agent://{id}/config` | Template | Agent-specific config: tools, role, memory scope |
 | System Health | `system://health` | Static | Agent count, workflow count, storage status |
-| System Agents | `system://agents` | Static | All 5 agents with tool lists, network mode |
+| System Agents | `system://agents` | Static | All 9 agents with tool lists, network mode |
 | System Workflows | `system://workflows` | Static | Both workflows with steps, HITL suspension points |
 | Memory Stats | `system://memory/stats` | Static | Thread count aggregated by resource |
 
@@ -400,7 +510,7 @@ Long-running operations that return a task ID immediately, allowing clients to p
 
 An AI agent can programmatically test a full diagnostic workflow:
 1. `system://health` → verify system ready
-2. `system://agents` → verify all 5 agents loaded
+2. `system://agents` → verify all 9 agents loaded
 3. `invoke_phenotype_agent` → test isolated symptom extraction
 4. `run_patient_intake` → trigger workflow, verify it suspends at HITL point
 5. `resume_workflow` → resume with review data, verify status changes
@@ -485,14 +595,15 @@ Intelligent step limit scaling via `resolveMaxSteps(message)` (`src/utils/max-st
 ## Testing
 
 ### Unit Tests
-- **335 tests** across 32 passing test suites
+- **500+ tests** across 50+ passing test suites
 - Colocated test files (`*.test.ts` / `*.test.tsx` next to source)
-- Coverage: tools (schema validation + execution), agents (config verification + network configuration + dynamic maxSteps), workflows (schema + structure + HITL suspend/resume schemas), processors (input/output behavior), CLI (command parsing + session management + network toggle + cli-core event types), MCP server (registration tests for all 20 tools, 7 resources, 4 prompts + task-based tools), utils (model router, logger, usage tracker, observability, NCBI rate limiter, maxSteps resolver), ClinVar lookup (query building, schema validation), TUI components (Header rendering, MessageBubble role-based styling, token display)
+- Coverage: tools (schema validation + execution for all 17 tools), agents (config verification + network configuration + dynamic maxSteps), workflows (schema + structure + HITL suspend/resume schemas), processors (input/output behavior), CLI (command parsing + session management + network toggle + cli-core event types), MCP server (registration tests for all 37+ tools, 7 resources, 4 prompts + task-based tools), utils (model router, logger, usage tracker, observability, NCBI rate limiter, maxSteps resolver), Phase 9 tools (clinical-trials 9 tests, openfda 8 tests, evidence-search 8 tests, ddx-generator 8 tests, pubmed-search 24 tests), TUI components (Header rendering, MessageBubble role-based styling, token display)
 
 ### MCP Integration Tests
 - `scripts/test-mcp-integration.ts` — exercises MCP tools, resources, prompts via MCP SDK client
 - Results: 56/57 passed; sole failure is `ask_asklepios` timeout under PubMed rate limiting (mitigated by task-based tools in Phase 8)
 - `scripts/test-workflows-live.ts` — live workflow execution, Orphanet/PubMed/HPO/document parser verification; 19/19 passed
+- `scripts/verify-citations.mjs` — PMID/PMC citation verification against NCBI database (404 lines) [Phase 9]
 
 ### Comprehensive Manual Verification (6-turn patient simulation)
 Patient persona: Maria Kowalski (32F, 8-year diagnostic odyssey, vascular EDS, arterial dissection)
@@ -506,7 +617,37 @@ Patient persona: Maria Kowalski (32F, 8-year diagnostic odyssey, vascular EDS, a
 | 5 | Brain feed/recall (cross-patient learning) | Case ingested as Case-vEDS-maria-002, 58K tokens |
 | 6 | Multi-session memory continuity | All patient data persisted across CLI restarts |
 
-**Verified working:** agent streaming, working memory persistence, multi-agent network routing, brain feed/recall, observability tracing, token tracking, HITL suspend/resume, clean stdout/stderr separation, all 17 MCP tools
+**Verified working:** agent streaming, working memory persistence, multi-agent network routing, brain feed/recall, observability tracing, token tracking, HITL suspend/resume, clean stdout/stderr separation, all MCP tools
+
+### Phase 9 Live API Validation
+
+| Tool | Query | Result |
+|------|-------|--------|
+| Citation verification | 17 PMIDs from hypothesis file | **17/17 citations exist** in PubMed (zero fabricated) |
+| OpenFDA | bupropion + leukopenia | **194 FAERS reports** (confirms real adverse event signal) |
+| ClinicalTrials.gov | ketamine + chronic headache | Found **NCT04814381** (KETALGIA, RECRUITING) |
+| ClinicalTrials.gov | LDN + chronic pain | Found completed LDN and naltrexone trials |
+
+---
+
+## External MCP Servers
+
+Configured in `.mcp.json`:
+
+| Server | Command | Purpose |
+|--------|---------|---------|
+| `asklepios` | `node dist/mcp/stdio.js` | Asklepios MCP server (37+ tools, 7 resources, 4 prompts) |
+| `biomcp` | `uvx biomcp run` | BioMCP — biological databases: drug adverse events, gene pathways, variant annotations, trial matching [Phase 9] |
+
+---
+
+## Known Gaps
+
+| Gap | Impact | Mitigation |
+|-----|--------|------------|
+| ~~`ddxGeneratorTool` not wired to any agent~~ | ~~DDx only available via MCP~~ | **Fixed** — wired to hypothesis-agent |
+| ClinVar lacks `rsId` input field | Cannot search by dbSNP rsID (e.g., rs1801133 for MTHFR C677T) | Use `gene` + `variant` fields as workaround |
+| BioMCP untested | Configured in `.mcp.json` but never verified working | Run `uvx biomcp run` to verify |
 
 ---
 

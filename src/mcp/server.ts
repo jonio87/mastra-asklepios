@@ -10,13 +10,14 @@ import { registerSessionTools } from './tools-session.js';
 import { registerStateTools } from './tools-state.js';
 import { registerStreamingTools } from './tools-streaming.js';
 import { registerTaskTools } from './tools-tasks.js';
+import { registerValidationTools } from './tools-validation.js';
 import { registerWorkflowTools } from './tools-workflows.js';
 
 /**
  * Asklepios MCP Server — agent-native control plane.
  *
  * Exposes the full Asklepios system as MCP primitives:
- *   - 29 tools (6 core + 4 agents + 3 workflows + 5 state + 2 task + 4 clinical + 3 session + 2 streaming)
+ *   - 33 tools (6 core + 4 agents + 3 workflows + 5 state + 2 task + 4 clinical + 4 validation + 3 session + 2 streaming)
  *   - 7 resources (patient data, system health, agent configs — subscribable)
  *   - 4 prompts (diagnostic workflows, case review, testing scenarios)
  *
@@ -48,6 +49,7 @@ export function createAsklepiosMcpServer(): McpServer {
   registerTaskTools(server);
   registerClinicalTools(server);
   registerResearchTools(server);
+  registerValidationTools(server);
   registerSessionTools(server);
   registerStreamingTools(server);
   registerResources(server);
