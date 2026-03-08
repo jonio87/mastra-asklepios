@@ -1,12 +1,12 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-
 import { mastra } from '../mastra.js';
 import { brainRecallTool } from '../tools/brain-recall.js';
 import { clinvarLookupTool } from '../tools/clinvar-lookup.js';
 import { hpoMapperTool } from '../tools/hpo-mapper.js';
 import { orphanetLookupTool } from '../tools/orphanet-lookup.js';
 import { pubmedSearchTool } from '../tools/pubmed-search.js';
+import { resolveMaxSteps } from '../utils/max-steps.js';
 
 /**
  * Core tools — the original 5 Asklepios MCP tools.
@@ -37,6 +37,7 @@ export function registerCoreTools(server: McpServer): void {
       const thread = threadId ?? crypto.randomUUID();
 
       const result = await agent.generate(message, {
+        maxSteps: resolveMaxSteps(message),
         memory: {
           thread,
           resource: resourceId,
@@ -58,11 +59,15 @@ export function registerCoreTools(server: McpServer): void {
     'search_pubmed',
     {
       description:
-        'Search PubMed for medical research articles and case reports related to rare diseases.',
+        'Search PubMed for medical research articles. Supports keyword search, PMID verification, batch PMID lookup, and cited-by queries. Returns full abstracts, MeSH terms, and publication types.',
       inputSchema: {
         query: z
           .string()
+          .optional()
           .describe('Search query for PubMed (e.g., "Ehlers-Danlos joint hypermobility")'),
+        pmid: z.string().optional().describe('Single PMID to verify and retrieve full details'),
+        pmids: z.array(z.string()).optional().describe('Multiple PMIDs to look up in batch'),
+        citedByPmid: z.string().optional().describe('Find articles that cite this PMID'),
         maxResults: z
           .number()
           .min(1)
@@ -72,7 +77,7 @@ export function registerCoreTools(server: McpServer): void {
       },
       annotations: { readOnlyHint: true, destructiveHint: false },
     },
-    async ({ query, maxResults }) => {
+    async ({ query, pmid, pmids, citedByPmid, maxResults }) => {
       if (!pubmedSearchTool.execute) {
         return {
           content: [{ type: 'text' as const, text: 'PubMed search tool not available' }],
@@ -80,7 +85,13 @@ export function registerCoreTools(server: McpServer): void {
         };
       }
       const result = await pubmedSearchTool.execute(
-        { query, maxResults: maxResults ?? 10 },
+        {
+          ...(query !== undefined ? { query } : {}),
+          ...(pmid !== undefined ? { pmid } : {}),
+          ...(pmids !== undefined ? { pmids } : {}),
+          ...(citedByPmid !== undefined ? { citedByPmid } : {}),
+          maxResults: maxResults ?? 10,
+        },
         { mastra },
       );
 

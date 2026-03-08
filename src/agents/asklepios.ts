@@ -5,6 +5,7 @@ import { clinicalToolSearch } from '../processors/tool-search.js';
 import { brainFeedTool } from '../tools/brain-feed.js';
 import { brainRecallTool } from '../tools/brain-recall.js';
 import { captureDataTool } from '../tools/capture-data.js';
+import { knowledgeQueryTool } from '../tools/knowledge-query.js';
 import { queryDataTool } from '../tools/query-data.js';
 import { modelRouter } from '../utils/model-router.js';
 import { brainAgent } from './brain-agent.js';
@@ -102,11 +103,16 @@ Full patient history stored in a database, queryable on demand via **query-data*
 
 Use Layer 2 tools when the conversation requires DETAIL beyond the dashboard.
 
-### Layer 3: Research & Knowledge Tools (on-demand via search_tools)
-Specialized tools loaded on demand — use **search_tools** to find them, then **load_tool** to activate:
+### Layer 3: Document Knowledge Base (query via knowledge-query tool)
+Semantic search across ingested medical documents (imaging reports, consultations, lab reports, narratives).
+Use **knowledge-query** with a natural language query — returns relevant document chunks ranked by similarity.
+Good queries: "nerve biopsy findings", "cervical MRI 2019", "craniovertebral junction", "CSF evaluation".
+
+### Layer 4: Research & Specialized Tools (on-demand via search_tools)
+Additional tools loaded on demand — use **search_tools** to find them, then **load_tool** to activate:
 - Research: pubmedSearch, orphanetLookup, clinvarLookup, deepResearch
 - Phenotype: hpoMapper, documentParser
-- Knowledge: ingestDocument, knowledgeQuery
+- Ingestion: ingestDocument
 
 ## Capturing Clinical Data (via capture-data tool)
 
@@ -132,21 +138,27 @@ Use the **capture-data** tool with the appropriate type:
 
 1. **Start with the dashboard** — your working memory tells you what's active
 2. **Pull detail on demand** — call query-data when conversation requires specifics
-3. **Search for tools** — use search_tools to find research/knowledge tools when needed
-4. **Never dump everything** — the patient doesn't need 80 lab values at once
+3. **Search documents** — use knowledge-query to find information in medical documents (imaging reports, consultations, lab reports, clinical notes)
+4. **Search for research tools** — use search_tools to find external research tools when needed
+5. **Never dump everything** — the patient doesn't need 80 lab values at once
 
-Example flow:
-- Dashboard says: criticalFindings=["WBC declining: 3.5→2.59 over 6 years"]
+Example flows:
 - Patient asks: "Tell me about my white blood cell counts"
-- You call: query-data with type="labs", testName="WBC", computeTrend=true
-- You respond with specific analysis
+  → query-data with type="labs", testName="WBC"
+- Clinician asks: "What does the nerve biopsy show?"
+  → knowledge-query with query="nerve biopsy findings"
+- Clinician asks: "Summarize MRI findings"
+  → knowledge-query with query="MRI imaging findings cervical"
+
+IMPORTANT: When asked about specific medical documents, reports, or findings that aren't in the structured lab data, ALWAYS use the knowledge-query tool to search the document knowledge base. This contains all imported medical documents including imaging reports, consultations, biopsies, EMG studies, and clinical notes.
 
 ## Research Workflow
 1. Check brain recall for similar patterns seen in other cases
-2. Use query-data for existing patient data before researching
-3. search_tools → load_tool to activate research tools (pubmedSearch, orphanetLookup, etc.)
-4. Synthesize findings with existing evidence
-5. Capture learnings via capture-data with type="agent-learning"
+2. Use query-data for structured patient data (labs, treatments)
+3. Use knowledge-query for unstructured clinical documents (reports, consultations, imaging)
+4. search_tools → load_tool to activate external research tools (pubmedSearch, orphanetLookup, etc.)
+5. Synthesize findings with existing evidence
+6. Capture learnings via capture-data with type="agent-learning"
 6. Update dashboard with new hypotheses/findings
 7. Feed anonymized insights to brain
 
@@ -160,9 +172,10 @@ Example flow:
 - Track what's MISSING (evidence gaps) as actively as what's present`,
   model: modelRouter,
   tools: {
-    // Always-loaded: consolidated capture/query + brain (essential every turn)
+    // Always-loaded: capture/query + knowledge search + brain (essential every turn)
     captureData: captureDataTool,
     queryData: queryDataTool,
+    knowledgeQuery: knowledgeQueryTool,
     brainRecall: brainRecallTool,
     brainFeed: brainFeedTool,
   },
