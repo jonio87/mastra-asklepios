@@ -93,7 +93,7 @@ describe('MCP Server', () => {
       const server = createAsklepiosMcpServer();
       const { tools, resources, resourceTemplates, prompts } = getServerInternals(server);
 
-      expect(Object.keys(tools).length).toBe(35);
+      expect(Object.keys(tools).length).toBe(39);
       expect(Object.keys(resources).length + Object.keys(resourceTemplates).length).toBe(7);
       expect(Object.keys(prompts).length).toBe(4);
     });

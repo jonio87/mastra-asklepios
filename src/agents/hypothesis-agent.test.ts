@@ -31,15 +31,16 @@ describe('hypothesisAgent', () => {
     expect(instructions).toContain('SINGLE TEST');
   });
 
-  it('has queryData, captureData, knowledgeQuery tools', () => {
+  it('has queryData, captureData, knowledgeQuery, ddxGenerator tools', () => {
     const tools = hypothesisAgent.listTools();
     expect(tools).toHaveProperty('queryData');
     expect(tools).toHaveProperty('captureData');
     expect(tools).toHaveProperty('knowledgeQuery');
+    expect(tools).toHaveProperty('ddxGenerator');
   });
 
-  it('has exactly 3 tools configured', () => {
+  it('has exactly 4 tools configured', () => {
     const tools = hypothesisAgent.listTools();
-    expect(Object.keys(tools)).toHaveLength(3);
+    expect(Object.keys(tools)).toHaveLength(4);
   });
 });
