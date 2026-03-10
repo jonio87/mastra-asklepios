@@ -1,5 +1,7 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
+import { diagnosticSynthesisSchema } from '../schemas/diagnostic-synthesis.js';
+import { getClinicalStore } from '../storage/clinical-store.js';
 import { logger } from '../utils/logger.js';
 import { runDeepResearch } from '../utils/parallel-ai.js';
 
@@ -15,15 +17,6 @@ const RoleReportSchema = z.object({
   durationMs: z.number().describe('Time taken in milliseconds'),
 });
 
-const SynthesisSchema = z.object({
-  convergence: z.array(z.string()).describe('Points where all 3 perspectives agree'),
-  divergence: z.array(z.string()).describe('Points of genuine disagreement between perspectives'),
-  informativeTests: z
-    .array(z.string())
-    .describe('Tests or investigations that would resolve disagreements'),
-  summary: z.string().describe('Overall synthesis summary'),
-});
-
 const OutputSchema = z.object({
   mode: z.string().describe('Execution mode used: internal or external'),
   advocate: RoleReportSchema.describe(
@@ -33,7 +26,11 @@ const OutputSchema = z.object({
     'Report from the skeptic perspective (challenging the hypothesis)',
   ),
   unbiased: RoleReportSchema.describe('Report from the unbiased arbiter perspective'),
-  synthesis: SynthesisSchema.describe('Cross-perspective synthesis'),
+  diagnosticSynthesis: diagnosticSynthesisSchema
+    .optional()
+    .describe(
+      'Structured diagnostic synthesis — populated in internal mode, placeholder in external (synthesis-agent fills it)',
+    ),
 });
 
 type RoleType = 'advocate' | 'skeptic' | 'unbiased';
@@ -79,32 +76,26 @@ function buildEmptyReport(message: string): {
 function buildInternalResult(): z.infer<typeof OutputSchema> {
   return {
     mode: 'internal',
-    advocate: buildEmptyReport('Internal mode: invoke synthesis-agent with advocate system prompt'),
-    skeptic: buildEmptyReport('Internal mode: invoke synthesis-agent with skeptic system prompt'),
-    unbiased: buildEmptyReport('Internal mode: invoke synthesis-agent with arbiter system prompt'),
-    synthesis: {
-      convergence: [
-        'Run synthesis-agent 3x with different role prompts to generate convergence analysis',
+    advocate: buildEmptyReport(
+      'Internal mode: invoke synthesis-agent with mode="advocate" — find strongest evidence FOR each hypothesis',
+    ),
+    skeptic: buildEmptyReport(
+      'Internal mode: invoke synthesis-agent with mode="skeptic" — find strongest evidence AGAINST each hypothesis',
+    ),
+    unbiased: buildEmptyReport(
+      'Internal mode: invoke synthesis-agent with mode="arbiter" — assign probability ranges from advocate+skeptic outputs',
+    ),
+    diagnosticSynthesis: {
+      hypotheses: [],
+      convergencePoints: [
+        'Pending: run synthesis-agent 3x with advocate/skeptic/arbiter modes, then populate',
       ],
-      divergence: ['Use advocate/skeptic/arbiter outputs to identify genuine disagreements'],
-      informativeTests: [
-        'Identify tests that would resolve disagreements between advocate and skeptic',
+      divergencePoints: [],
+      mostInformativeTests: [],
+      unresolvedQuestions: [
+        'Invoke synthesis-agent with mode="advocate", then mode="skeptic", then mode="arbiter" passing both outputs',
       ],
-      summary:
-        'Internal mode: use synthesis-agent with 3 different role prompts for adversarial analysis',
     },
-  };
-}
-
-function buildPlaceholderSynthesis(): z.infer<typeof SynthesisSchema> {
-  return {
-    convergence: ['Convergence analysis pending — synthesis-agent will analyze the 3 reports'],
-    divergence: ['Divergence analysis pending — synthesis-agent will identify disagreements'],
-    informativeTests: [
-      'Informative test identification pending — synthesis-agent will recommend discriminating tests',
-    ],
-    summary:
-      'External research complete. The synthesis-agent should now analyze the 3 adversarial reports to produce final convergence/divergence analysis.',
   };
 }
 
@@ -190,7 +181,7 @@ export const adversarialSynthesisTool = createTool({
       totalDurationMs,
     });
 
-    return {
+    const externalResult = {
       mode: 'external',
       advocate: {
         report: advocateResult.output,
@@ -207,7 +198,45 @@ export const adversarialSynthesisTool = createTool({
         sources: unbiasedResult.sources,
         durationMs: totalDurationMs,
       },
-      synthesis: buildPlaceholderSynthesis(),
+      diagnosticSynthesis: {
+        hypotheses: [],
+        convergencePoints: [
+          'External mode: synthesis-agent should analyze advocate+skeptic+unbiased reports and populate structured synthesis',
+        ],
+        divergencePoints: [],
+        mostInformativeTests: [],
+        unresolvedQuestions: [
+          'Invoke synthesis-agent with mode="arbiter" passing the three reports above to produce structured diagnostic synthesis',
+        ],
+      },
     };
+
+    // Auto-capture: persist query record for synthesis (fire-and-forget)
+    persistSynthesisQuery(hypothesis, totalDurationMs).catch((err: unknown) => {
+      logger.warn('Auto-capture of synthesis query failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
+    return externalResult;
   },
 });
+
+/** Auto-persist a research query record for the adversarial synthesis execution. */
+async function persistSynthesisQuery(hypothesis: string, durationMs: number): Promise<void> {
+  const store = getClinicalStore();
+  const today = new Date().toISOString().split('T')[0] ?? '';
+
+  await store.addResearchQuery({
+    id: `rquery-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    patientId: 'unknown',
+    query: `Adversarial synthesis: ${hypothesis}`,
+    toolUsed: 'adversarialSynthesis',
+    date: today,
+    durationMs,
+    resultCount: 3,
+    stage: 7,
+  });
+
+  logger.info('Auto-captured adversarial synthesis query');
+}

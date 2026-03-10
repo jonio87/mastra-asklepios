@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { MastraVector } from '@mastra/core/vector';
 import { MDocument } from '@mastra/rag';
 import { logger } from '../utils/logger.js';
@@ -46,6 +47,7 @@ export class DocumentStore {
   private vector: MastraVector;
   private embedder: ((texts: string[]) => Promise<number[][]>) | null;
   private initialized = false;
+  private ingestedHashes = new Set<string>();
 
   constructor(vector: MastraVector, embedder: ((texts: string[]) => Promise<number[][]>) | null) {
     this.vector = vector;
@@ -67,15 +69,33 @@ export class DocumentStore {
     this.initialized = true;
   }
 
+  /**
+   * Ingest a document with content-hash based dedup.
+   * Chunk IDs are derived from a hash of (patientId + content + chunkIndex),
+   * so re-ingesting the same document produces the same IDs → upsert overwrites
+   * instead of creating duplicates.
+   */
   async ingestDocument(
     text: string,
     metadata: DocumentMetadata,
-  ): Promise<{ chunkCount: number; ids: string[] }> {
+  ): Promise<{ chunkCount: number; ids: string[]; duplicate: boolean }> {
     if (!this.embedder) {
       throw new Error('Embedder required for document ingestion. Set OPENAI_API_KEY.');
     }
 
     await this.ensureInitialized();
+
+    // Compute document-level content hash for dedup
+    const contentHash = createHash('sha256')
+      .update(`${metadata.patientId}|${text}`)
+      .digest('hex')
+      .slice(0, 16);
+
+    // Check if this exact document was already ingested
+    if (this.ingestedHashes.has(contentHash)) {
+      logger.debug('Document dedup: content hash match (in-memory)', { contentHash });
+      return { chunkCount: 0, ids: [], duplicate: true };
+    }
 
     const doc = MDocument.fromMarkdown(text, {
       patientId: metadata.patientId,
@@ -88,18 +108,20 @@ export class DocumentStore {
     // Choose chunking strategy based on document type
     const chunks = await chunkByType(doc, metadata.documentType);
     if (chunks.length === 0) {
-      return { chunkCount: 0, ids: [] };
+      return { chunkCount: 0, ids: [], duplicate: false };
     }
 
     const texts = chunks.map((c) => c.text);
     const embeddings = await this.embedder(texts);
 
-    const ids = chunks.map((_, i) => `doc-${metadata.patientId}-${Date.now()}-${i}`);
+    // Stable IDs: hash of (contentHash + chunkIndex) → same doc always gets same chunk IDs
+    const ids = chunks.map((_, i) => `doc-${contentHash}-${i}`);
 
     const metadataArray = chunks.map((c, i) => ({
       ...metadata,
       chunkIndex: i,
       chunkText: c.text.slice(0, 200), // Preview for debugging
+      contentHash,
       ...(c.metadata || {}),
     }));
 
@@ -110,13 +132,16 @@ export class DocumentStore {
       ids,
     });
 
+    this.ingestedHashes.add(contentHash);
+
     logger.info('Ingested document', {
       type: metadata.documentType,
       chunks: chunks.length,
       patientId: metadata.patientId,
+      contentHash,
     });
 
-    return { chunkCount: chunks.length, ids };
+    return { chunkCount: chunks.length, ids, duplicate: false };
   }
 
   async queryDocuments(

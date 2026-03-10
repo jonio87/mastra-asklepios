@@ -15,6 +15,7 @@ import {
   piiRedactorProcessor,
 } from './processors/index.js';
 import { StderrLogger } from './utils/stderr-logger.js';
+import { diagnosticFlowWorkflow } from './workflows/diagnostic-flow.js';
 import { diagnosticResearchWorkflow } from './workflows/diagnostic-research.js';
 import { patientIntakeWorkflow } from './workflows/patient-intake.js';
 
@@ -44,6 +45,7 @@ export const mastra = new Mastra({
   workflows: {
     'patient-intake': patientIntakeWorkflow,
     'diagnostic-research': diagnosticResearchWorkflow,
+    'diagnostic-flow': diagnosticFlowWorkflow,
   },
   processors: {
     piiRedactor: piiRedactorProcessor,

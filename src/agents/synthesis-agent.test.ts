@@ -27,8 +27,11 @@ describe('synthesisAgent', () => {
     expect(instructions).toContain('differential');
   });
 
-  it('has no tools configured (pure reasoning agent)', () => {
+  it('has 3 tools configured for evidence access', () => {
     const tools = synthesisAgent.listTools();
-    expect(Object.keys(tools)).toHaveLength(0);
+    expect(Object.keys(tools)).toHaveLength(3);
+    expect(tools).toHaveProperty('queryData');
+    expect(tools).toHaveProperty('knowledgeQuery');
+    expect(tools).toHaveProperty('captureData');
   });
 });

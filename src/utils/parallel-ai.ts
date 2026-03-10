@@ -1,6 +1,6 @@
 import { logger } from './logger.js';
 
-interface ParallelSource {
+export interface ParallelSource {
   url: string;
   title: string;
   excerpt: string;

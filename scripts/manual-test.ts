@@ -285,7 +285,7 @@ async function testMCPServer() {
 
   try {
     const { createAsklepiosMcpServer } = await import('../src/mcp/server.js');
-    const server = createAsklepiosMcpServer();
+    const server = await createAsklepiosMcpServer();
     pass('MCP Server', 'created successfully');
 
     // We can't connect via stdio in this test, but we can verify it was created

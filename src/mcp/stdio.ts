@@ -21,7 +21,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createAsklepiosMcpServer } from './server.js';
 
 async function main(): Promise<void> {
-  const server = createAsklepiosMcpServer();
+  const server = await createAsklepiosMcpServer();
   const transport = new StdioServerTransport();
 
   await server.connect(transport);

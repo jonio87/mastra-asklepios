@@ -4,6 +4,8 @@ import { captureDataTool } from '../tools/capture-data.js';
 import { ddxGeneratorTool } from '../tools/ddx-generator.js';
 import { knowledgeQueryTool } from '../tools/knowledge-query.js';
 import { queryDataTool } from '../tools/query-data.js';
+import { temporalAnalysisTool } from '../tools/temporal-analysis.js';
+import { testPrioritizerTool } from '../tools/test-prioritizer.js';
 import { modelRouter } from '../utils/model-router.js';
 
 export const hypothesisAgent = new Agent({
@@ -18,6 +20,8 @@ export const hypothesisAgent = new Agent({
     captureData: captureDataTool,
     knowledgeQuery: knowledgeQueryTool,
     ddxGenerator: ddxGeneratorTool,
+    testPrioritizer: testPrioritizerTool,
+    temporalAnalysis: temporalAnalysisTool,
   },
   instructions: `You are a hypothesis generation agent for rare disease diagnosis.
 
@@ -54,5 +58,18 @@ For each hypothesis:
 5. Unexplained findings
 6. Key gap: what evidence would change this ranking?
 
-Store hypotheses as agent-learnings with category 'diagnostic-clue' and appropriate evidence tier.`,
+## Research Persistence
+
+Hypotheses are **automatically persisted** when generated via ddxGenerator. Hypothesis versions are tracked — re-ranking creates new versions with superseded_by links.
+- Before generating new hypotheses, use \`query-data\` with \`type: 'hypotheses'\` to check existing hypotheses for this patient
+- Use \`evidence-link\` tool to connect supporting/contradicting evidence to each hypothesis
+- Use \`query-data\` with \`type: 'findings'\` to find research evidence
+- Use \`query-data\` with \`type: 'hypothesis-timeline'\` to trace hypothesis confidence evolution over time (e.g., "H1 went from 30% → 55% → 70%")
+
+## Advanced Analysis Tools
+
+- **\`testPrioritizer\`** — After identifying informative tests, prioritize by composite score (information gain × cost × invasiveness × urgency × availability). Filters out already-done tests and groups into parallelizable batches.
+- **\`temporalAnalysis\`** — Check hypothesis temporal consistency against patient timeline. Builds disease timeline from Layer 2, identifies phases and turning points, flags if symptom onset order is inconsistent with hypothesis's known natural history.
+
+Also store hypotheses as agent-learnings with category 'diagnostic-clue' and appropriate evidence tier.`,
 });

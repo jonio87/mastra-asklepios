@@ -1,7 +1,17 @@
-import { deepResearchTool } from './deep-research.js';
+import { jest } from '@jest/globals';
+
+// Mock the biomedical MCP client before importing the tool
+jest.mock('../clients/biomedical-mcp.js', () => ({
+  getBiomedicalTools: jest.fn(() => Promise.resolve({})),
+}));
+
+jest.mock('../utils/logger.js', () => ({
+  logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+}));
 
 describe('deepResearchTool', () => {
-  it('has correct tool configuration', () => {
+  it('has correct tool configuration', async () => {
+    const { deepResearchTool } = await import('./deep-research.js');
     expect(deepResearchTool.id).toBe('deep-research');
     expect(deepResearchTool.description).toBeDefined();
     expect(deepResearchTool.inputSchema).toBeDefined();
@@ -9,14 +19,16 @@ describe('deepResearchTool', () => {
     expect(deepResearchTool.execute).toBeDefined();
   });
 
-  it('validates valid input with query only', () => {
+  it('validates valid input with query only', async () => {
+    const { deepResearchTool } = await import('./deep-research.js');
     const result = deepResearchTool.inputSchema.safeParse({
       query: 'Ehlers-Danlos Syndrome hypermobility type',
     });
     expect(result.success).toBe(true);
   });
 
-  it('validates input with all optional fields', () => {
+  it('validates input with all optional fields', async () => {
+    const { deepResearchTool } = await import('./deep-research.js');
     const result = deepResearchTool.inputSchema.safeParse({
       query: 'rare connective tissue disorder',
       context: 'Patient is 25-year-old female with joint hypermobility',
@@ -26,7 +38,8 @@ describe('deepResearchTool', () => {
     expect(result.success).toBe(true);
   });
 
-  it('rejects maxSources above 100', () => {
+  it('rejects maxSources above 100', async () => {
+    const { deepResearchTool } = await import('./deep-research.js');
     const result = deepResearchTool.inputSchema.safeParse({
       query: 'test',
       maxSources: 200,
@@ -34,12 +47,14 @@ describe('deepResearchTool', () => {
     expect(result.success).toBe(false);
   });
 
-  it('rejects missing query', () => {
+  it('rejects missing query', async () => {
+    const { deepResearchTool } = await import('./deep-research.js');
     const result = deepResearchTool.inputSchema.safeParse({});
     expect(result.success).toBe(false);
   });
 
-  it('validates output schema with valid research report', () => {
+  it('validates output schema with valid research report', async () => {
+    const { deepResearchTool } = await import('./deep-research.js');
     const result = deepResearchTool.outputSchema.safeParse({
       query: 'test query',
       findings: [
@@ -60,7 +75,8 @@ describe('deepResearchTool', () => {
     expect(result.success).toBe(true);
   });
 
-  it('validates all evidence level types', () => {
+  it('validates all evidence level types', async () => {
+    const { deepResearchTool } = await import('./deep-research.js');
     const levels = [
       'case-report',
       'case-series',
@@ -93,7 +109,8 @@ describe('deepResearchTool', () => {
     }
   });
 
-  it('rejects invalid evidence level', () => {
+  it('rejects invalid evidence level', async () => {
+    const { deepResearchTool } = await import('./deep-research.js');
     const result = deepResearchTool.outputSchema.safeParse({
       query: 'test',
       findings: [
@@ -113,7 +130,8 @@ describe('deepResearchTool', () => {
     expect(result.success).toBe(false);
   });
 
-  it('rejects relevance score outside 0-1 range', () => {
+  it('rejects relevance score outside 0-1 range', async () => {
+    const { deepResearchTool } = await import('./deep-research.js');
     const result = deepResearchTool.outputSchema.safeParse({
       query: 'test',
       findings: [

@@ -2,7 +2,14 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { mastra } from '../mastra.js';
 import { evidenceProvenanceFields } from '../schemas/clinical-record.js';
+import {
+  certaintyLevelEnum,
+  evidenceLevelEnum,
+  externalIdTypeEnum,
+} from '../schemas/research-record.js';
+import { getClinicalStore } from '../storage/clinical-store.js';
 import { captureDataTool } from '../tools/capture-data.js';
+import { evidenceLinkTool } from '../tools/evidence-link.js';
 import { ingestDocumentTool } from '../tools/ingest-document.js';
 import { knowledgeQueryTool } from '../tools/knowledge-query.js';
 import { queryDataTool } from '../tools/query-data.js';
@@ -10,7 +17,7 @@ import { mcpLog, notifyResourceUpdated } from './notifications.js';
 
 /**
  * Clinical data tools — Layer 2 structured clinical record + Layer 3 document knowledge base.
- * Exposes 4 tools for external agents to write/read patient clinical data and documents.
+ * Exposes tools for external agents to write/read patient clinical data, research findings, and documents.
  */
 export function registerClinicalTools(server: McpServer): void {
   // ─── capture_clinical_data — write to Layer 2 structured store ─────
@@ -18,7 +25,7 @@ export function registerClinicalTools(server: McpServer): void {
     'capture_clinical_data',
     {
       description:
-        'Capture clinical data into the structured clinical record. Uses a type discriminator to route data to the correct handler. Supports: patient-report (symptom updates, concerns, goals), agent-learning (diagnostic insights, patterns), contradiction (conflicting findings), lab-result, treatment-trial, consultation.',
+        'Capture clinical or research data into the structured record. Uses a type discriminator to route data to the correct handler. Supports: patient-report, agent-learning, contradiction, lab-result, treatment-trial, consultation, research-finding (literature/trial findings with external IDs), research-query (search audit trail), hypothesis (diagnostic hypotheses with probability ranges).',
       inputSchema: {
         type: z
           .enum([
@@ -28,8 +35,11 @@ export function registerClinicalTools(server: McpServer): void {
             'lab-result',
             'treatment-trial',
             'consultation',
+            'research-finding',
+            'research-query',
+            'hypothesis',
           ])
-          .describe('Type of clinical data to capture'),
+          .describe('Type of clinical/research data to capture'),
         patientId: z.string().describe('Patient resource ID (e.g., "patient-001")'),
         // patient-report fields
         reportType: z
@@ -134,6 +144,103 @@ export function registerClinicalTools(server: McpServer): void {
           .array(z.string())
           .optional()
           .describe('[consultation] Specialist recommendations'),
+        // research-finding fields
+        sourceTool: z
+          .string()
+          .optional()
+          .describe('[research-finding] Tool that produced this finding'),
+        externalId: z
+          .string()
+          .optional()
+          .describe('[research-finding] External identifier (PMID, NCT ID, ORPHA code, etc.)'),
+        externalIdType: externalIdTypeEnum
+          .optional()
+          .describe('[research-finding] Type of external identifier'),
+        title: z.string().optional().describe('[research-finding|hypothesis] Title or name'),
+        summary: z.string().optional().describe('[research-finding] Finding summary'),
+        url: z.string().optional().describe('[research-finding] Source URL'),
+        relevance: z
+          .number()
+          .min(0)
+          .max(1)
+          .optional()
+          .describe('[research-finding] Relevance score 0.0-1.0'),
+        evidenceLevel: evidenceLevelEnum.optional().describe('[research-finding] Evidence level'),
+        researchQueryId: z
+          .string()
+          .optional()
+          .describe('[research-finding] FK to research query that produced this'),
+        rawData: z
+          .string()
+          .optional()
+          .describe('[research-finding] Full JSON response for re-processing'),
+        // research-query fields
+        query: z.string().optional().describe('[research-query] Original search query'),
+        toolUsed: z
+          .string()
+          .optional()
+          .describe('[research-query] Tool used (e.g., "deepResearch", "biomcp_article_searcher")'),
+        agent: z.string().optional().describe('[research-query] Agent that initiated the query'),
+        resultCount: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('[research-query] Number of results found'),
+        findingIds: z
+          .array(z.string())
+          .optional()
+          .describe('[research-query] IDs of research findings from this query'),
+        synthesis: z.string().optional().describe('[research-query] Synthesized summary'),
+        researchGaps: z
+          .array(z.string())
+          .optional()
+          .describe('[research-query] Identified knowledge gaps'),
+        suggestedFollowUp: z
+          .array(z.string())
+          .optional()
+          .describe('[research-query] Suggested follow-up queries'),
+        stage: z
+          .number()
+          .int()
+          .min(0)
+          .max(9)
+          .optional()
+          .describe('[research-query|hypothesis] Diagnostic flow stage (0-9)'),
+        durationMs: z
+          .number()
+          .int()
+          .optional()
+          .describe('[research-query] Query execution time in ms'),
+        // hypothesis fields
+        name: z.string().optional().describe('[hypothesis] Hypothesis name'),
+        icdCode: z.string().optional().describe('[hypothesis] ICD-10 code'),
+        probabilityLow: z
+          .number()
+          .min(0)
+          .max(100)
+          .optional()
+          .describe('[hypothesis] Lower bound probability 0-100'),
+        probabilityHigh: z
+          .number()
+          .min(0)
+          .max(100)
+          .optional()
+          .describe('[hypothesis] Upper bound probability 0-100'),
+        advocateCase: z.string().optional().describe('[hypothesis] Case in favor'),
+        skepticCase: z.string().optional().describe('[hypothesis] Case against'),
+        arbiterVerdict: z.string().optional().describe('[hypothesis] Arbiter synthesis/verdict'),
+        hypothesisEvidenceTier: z
+          .enum(['T1', 'T2', 'T3'])
+          .optional()
+          .describe('[hypothesis] Evidence tier for hypothesis'),
+        certaintyLevel: certaintyLevelEnum.optional().describe('[hypothesis] Certainty level'),
+        version: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe('[hypothesis] Version number (increments on re-ranking)'),
         // evidence provenance fields (apply to all types) — imported from clinical-record.ts
         ...evidenceProvenanceFields,
       },
@@ -178,11 +285,22 @@ export function registerClinicalTools(server: McpServer): void {
     'query_clinical_data',
     {
       description:
-        'Query the structured clinical record. Uses a type discriminator to route the query. Supports: labs (with trend computation), treatments (with exhausted-class detection), consultations (with missing-conclusion flagging), contradictions (with resolution tracking), patient-history (composite recent view).',
+        'Query structured clinical or research data. Uses a type discriminator to route the query. Supports: labs (with trend computation), treatments (with exhausted-class detection), consultations (with missing-conclusion flagging), contradictions (with resolution tracking), patient-history (composite recent view), findings (research literature/trial findings), research-queries (search audit trail), hypotheses (diagnostic hypotheses with evidence links), hypothesis-timeline (full version chain with confidence evolution and direction changes), research-summary (aggregate statistics).',
       inputSchema: {
         type: z
-          .enum(['labs', 'treatments', 'consultations', 'contradictions', 'patient-history'])
-          .describe('Type of clinical data to query'),
+          .enum([
+            'labs',
+            'treatments',
+            'consultations',
+            'contradictions',
+            'patient-history',
+            'findings',
+            'research-queries',
+            'hypotheses',
+            'hypothesis-timeline',
+            'research-summary',
+          ])
+          .describe('Type of clinical/research data to query'),
         patientId: z.string().describe('Patient resource ID'),
         // labs filters
         testName: z.string().optional().describe('[labs] Filter by test name (e.g., "WBC")'),
@@ -192,6 +310,10 @@ export function registerClinicalTools(server: McpServer): void {
           .boolean()
           .optional()
           .describe('[labs] Also compute trend analysis for the test'),
+        flag: z
+          .enum(['LOW', 'HIGH', 'normal', 'CRITICAL'])
+          .optional()
+          .describe('[labs] Filter by flag status (LOW, HIGH, normal, CRITICAL)'),
         // treatments filters
         drugClass: z.string().optional().describe('[treatments] Filter by drug class'),
         filterEfficacy: z
@@ -211,6 +333,49 @@ export function registerClinicalTools(server: McpServer): void {
           .number()
           .optional()
           .describe('[patient-history] Number of days to look back (default: 30)'),
+        // findings filters
+        filterSource: z
+          .string()
+          .optional()
+          .describe('[findings] Filter by source (e.g., "PubMed", "ClinicalTrials.gov")'),
+        filterExternalIdType: externalIdTypeEnum
+          .optional()
+          .describe('[findings] Filter by external ID type (pmid, nct, orpha, omim, gene, etc.)'),
+        filterEvidenceLevel: evidenceLevelEnum
+          .optional()
+          .describe('[findings] Filter by evidence level'),
+        researchQueryId: z.string().optional().describe('[findings] Filter by research query ID'),
+        // research-queries filters
+        filterToolUsed: z.string().optional().describe('[research-queries] Filter by tool used'),
+        filterAgent: z.string().optional().describe('[research-queries] Filter by agent name'),
+        filterStage: z
+          .number()
+          .int()
+          .min(0)
+          .max(9)
+          .optional()
+          .describe('[research-queries] Filter by diagnostic flow stage'),
+        // hypotheses filters
+        filterName: z
+          .string()
+          .optional()
+          .describe('[hypotheses] Filter by hypothesis name (LIKE search)'),
+        filterCertaintyLevel: certaintyLevelEnum
+          .optional()
+          .describe('[hypotheses] Filter by certainty level'),
+        latestOnly: z
+          .boolean()
+          .optional()
+          .describe('[hypotheses] Only return latest (non-superseded) versions (default: true)'),
+        withEvidence: z
+          .boolean()
+          .optional()
+          .describe('[hypotheses] Include linked evidence for each hypothesis'),
+        // hypothesis-timeline filters
+        hypothesisName: z
+          .string()
+          .optional()
+          .describe('[hypothesis-timeline] Exact hypothesis name to trace through version history'),
       },
       annotations: { readOnlyHint: true, destructiveHint: false },
     },
@@ -336,6 +501,107 @@ export function registerClinicalTools(server: McpServer): void {
       };
     },
   );
+
+  // ─── link_evidence — link findings/clinical records to hypotheses ───
+  server.registerTool(
+    'link_evidence',
+    {
+      description:
+        'Link a research finding or clinical record to a diagnostic hypothesis. Tracks directional relationship (supporting, contradicting, neutral, inconclusive) with confidence scoring. Use action="link" to create links, action="query" to retrieve all evidence for a hypothesis.',
+      inputSchema: {
+        action: z.enum(['link', 'query']).describe('"link" to create, "query" to retrieve'),
+        patientId: z.string().describe('Patient resource ID'),
+        hypothesisId: z
+          .string()
+          .describe('Hypothesis ID to link evidence to or query evidence for'),
+        findingId: z
+          .string()
+          .optional()
+          .describe('(link) Research finding ID — provide this OR clinicalRecordId'),
+        clinicalRecordId: z
+          .string()
+          .optional()
+          .describe('(link) Clinical record ID — provide this OR findingId'),
+        clinicalRecordType: z
+          .enum([
+            'lab-result',
+            'consultation',
+            'contradiction',
+            'treatment-trial',
+            'patient-report',
+            'agent-learning',
+          ])
+          .optional()
+          .describe('(link) Type of clinical record'),
+        direction: z
+          .enum(['supporting', 'contradicting', 'neutral', 'inconclusive'])
+          .optional()
+          .describe('(link) Relationship direction'),
+        claim: z.string().optional().describe('(link) Evidence claim text'),
+        confidence: z.number().min(0).max(1).optional().describe('(link) Confidence 0.0-1.0'),
+        tier: z.enum(['T1', 'T2', 'T3']).optional().describe('(link) Evidence tier'),
+        notes: z.string().optional().describe('(link) Additional notes'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async (input) => {
+      if (!evidenceLinkTool.execute) {
+        return {
+          content: [{ type: 'text' as const, text: 'Evidence link tool not available' }],
+          isError: true,
+        };
+      }
+
+      const result = await evidenceLinkTool.execute(input, { mastra });
+      const patientId = gs(input, 'patientId');
+
+      if (gs(input, 'action') === 'link') {
+        mcpLog(
+          server,
+          'info',
+          { tool: 'link_evidence', patientId, hypothesisId: gs(input, 'hypothesisId') },
+          'clinical',
+        );
+        notifyResourceUpdated(server, `patient://${patientId}/profile`);
+      }
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  // ─── patient_research_summary — aggregate research statistics ───────
+  server.registerTool(
+    'patient_research_summary',
+    {
+      description:
+        'Get aggregate research statistics for a patient: total findings, queries, hypotheses, evidence links, top sources, and latest dates.',
+      inputSchema: {
+        patientId: z.string().describe('Patient resource ID'),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false },
+    },
+    async (input) => {
+      const store = getClinicalStore();
+      const patientId = gs(input, 'patientId');
+      const summary = await store.getPatientResearchSummary(patientId);
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(summary, null, 2),
+          },
+        ],
+      };
+    },
+  );
 }
 
 // ─── Input builders ─────────────────────────────────────────────────
@@ -403,10 +669,49 @@ const captureFieldsByType: Record<string, FieldSpec[]> = {
     'conclusions',
     'recommendations',
   ],
+  'research-finding': [
+    'source',
+    'sourceTool',
+    'externalId',
+    'externalIdType',
+    'title',
+    'summary',
+    'url',
+    'relevance',
+    'evidenceLevel',
+    'researchQueryId',
+    'rawData',
+    'date',
+  ],
+  'research-query': [
+    'query',
+    'toolUsed',
+    'agent',
+    'resultCount',
+    'findingIds',
+    'synthesis',
+    { from: 'researchGaps', to: 'gaps' },
+    'suggestedFollowUp',
+    'stage',
+    'durationMs',
+  ],
+  hypothesis: [
+    'name',
+    'icdCode',
+    'probabilityLow',
+    'probabilityHigh',
+    'advocateCase',
+    'skepticCase',
+    'arbiterVerdict',
+    { from: 'hypothesisEvidenceTier', to: 'evidenceTier' },
+    'certaintyLevel',
+    'stage',
+    'version',
+  ],
 };
 
 const queryFieldsByType: Record<string, FieldSpec[]> = {
-  labs: ['testName', 'dateFrom', 'dateTo', 'computeTrend'],
+  labs: ['testName', 'dateFrom', 'dateTo', 'computeTrend', 'flag'],
   treatments: ['drugClass', { from: 'filterEfficacy', to: 'efficacy' }],
   consultations: [
     { from: 'filterSpecialty', to: 'specialty' },
@@ -414,6 +719,29 @@ const queryFieldsByType: Record<string, FieldSpec[]> = {
   ],
   contradictions: ['status'],
   'patient-history': ['recentDays'],
+  findings: [
+    { from: 'filterSource', to: 'source' },
+    { from: 'filterExternalIdType', to: 'externalIdType' },
+    { from: 'filterEvidenceLevel', to: 'evidenceLevel' },
+    'dateFrom',
+    'dateTo',
+    'researchQueryId',
+  ],
+  'research-queries': [
+    { from: 'filterToolUsed', to: 'toolUsed' },
+    { from: 'filterAgent', to: 'agent' },
+    { from: 'filterStage', to: 'stage' },
+    'dateFrom',
+    'dateTo',
+  ],
+  hypotheses: [
+    { from: 'filterName', to: 'name' },
+    { from: 'filterCertaintyLevel', to: 'certaintyLevel' },
+    'latestOnly',
+    'withEvidence',
+  ],
+  'hypothesis-timeline': [{ from: 'hypothesisName', to: 'name' }],
+  'research-summary': [],
 };
 
 /** Pick declared fields from flat MCP input into a typed object. */

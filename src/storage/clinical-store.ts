@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Client } from '@libsql/client';
 import { createClient } from '@libsql/client';
 import type {
@@ -9,6 +10,13 @@ import type {
   PatientReport,
   TreatmentTrial,
 } from '../schemas/clinical-record.js';
+import type {
+  HypothesisEvidenceLink,
+  ResearchFinding,
+  ResearchHypothesis,
+  ResearchQuery,
+  ResearchSummary,
+} from '../schemas/research-record.js';
 import { logger } from '../utils/logger.js';
 
 /**
@@ -142,6 +150,97 @@ export class ClinicalStore {
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             )`,
       `CREATE INDEX IF NOT EXISTS idx_learnings_patient_cat ON clinical_agent_learnings(patient_id, category)`,
+
+      // ─── Layer 2B: Research Data Store ──────────────────────────────
+      `CREATE TABLE IF NOT EXISTS research_findings (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                source TEXT NOT NULL,
+                source_tool TEXT,
+                external_id TEXT,
+                external_id_type TEXT,
+                title TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                url TEXT,
+                relevance REAL,
+                evidence_level TEXT,
+                research_query_id TEXT,
+                date TEXT NOT NULL,
+                raw_data TEXT,
+                evidence_tier TEXT,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                content_hash TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
+      `CREATE INDEX IF NOT EXISTS idx_findings_patient ON research_findings(patient_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_findings_external ON research_findings(external_id, external_id_type)`,
+      `CREATE INDEX IF NOT EXISTS idx_findings_query ON research_findings(research_query_id)`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_findings_dedup_external ON research_findings(patient_id, external_id, external_id_type) WHERE external_id IS NOT NULL`,
+
+      `CREATE TABLE IF NOT EXISTS research_queries (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                query TEXT NOT NULL,
+                tool_used TEXT NOT NULL,
+                agent TEXT,
+                result_count INTEGER DEFAULT 0,
+                finding_ids TEXT,
+                synthesis TEXT,
+                gaps TEXT,
+                suggested_follow_up TEXT,
+                stage INTEGER,
+                date TEXT NOT NULL,
+                duration_ms INTEGER,
+                evidence_tier TEXT,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
+      `CREATE INDEX IF NOT EXISTS idx_queries_patient ON research_queries(patient_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_queries_tool ON research_queries(tool_used)`,
+
+      `CREATE TABLE IF NOT EXISTS research_hypotheses (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                icd_code TEXT,
+                probability_low REAL,
+                probability_high REAL,
+                advocate_case TEXT,
+                skeptic_case TEXT,
+                arbiter_verdict TEXT,
+                evidence_tier TEXT,
+                certainty_level TEXT,
+                stage INTEGER,
+                version INTEGER DEFAULT 1,
+                superseded_by TEXT,
+                date TEXT NOT NULL,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
+      `CREATE INDEX IF NOT EXISTS idx_hypotheses_patient ON research_hypotheses(patient_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_hypotheses_name ON research_hypotheses(patient_id, name)`,
+
+      `CREATE TABLE IF NOT EXISTS hypothesis_evidence_links (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                hypothesis_id TEXT NOT NULL,
+                finding_id TEXT,
+                clinical_record_id TEXT,
+                clinical_record_type TEXT,
+                direction TEXT NOT NULL,
+                claim TEXT NOT NULL,
+                confidence REAL,
+                tier TEXT,
+                date TEXT NOT NULL,
+                notes TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
+      `CREATE INDEX IF NOT EXISTS idx_links_hypothesis ON hypothesis_evidence_links(hypothesis_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_links_finding ON hypothesis_evidence_links(finding_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_links_clinical ON hypothesis_evidence_links(clinical_record_id)`,
     ];
 
     for (const sql of statements) {
@@ -168,6 +267,21 @@ export class ClinicalStore {
           });
       }
     }
+    // Migration: add content_hash column to research_findings
+    await this.client
+      .execute(`ALTER TABLE research_findings ADD COLUMN content_hash TEXT`)
+      .catch(() => {
+        /* column already exists */
+      });
+    // Create dedup index (after content_hash column exists)
+    await this.client
+      .execute(
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_findings_dedup_hash ON research_findings(patient_id, content_hash) WHERE content_hash IS NOT NULL AND external_id IS NULL`,
+      )
+      .catch(() => {
+        /* index already exists */
+      });
+
     logger.debug('ClinicalStore migration complete');
   }
 
@@ -228,7 +342,12 @@ export class ClinicalStore {
     const args: (string | null)[] = [params.patientId];
 
     if (params.testName) {
-      conditions.push('test_name = ?');
+      // Support both exact match and substring search (prefix with % for LIKE)
+      if (params.testName.includes('%')) {
+        conditions.push('test_name LIKE ?');
+      } else {
+        conditions.push('test_name = ?');
+      }
       args.push(params.testName);
     }
     if (params.dateFrom) {
@@ -253,7 +372,7 @@ export class ClinicalStore {
       id: String(row['id']),
       patientId: String(row['patient_id']),
       testName: String(row['test_name']),
-      value: Number.isNaN(Number(row['value'])) ? String(row['value']) : Number(row['value']),
+      value: parseLabValue(row['value']),
       unit: String(row['unit']),
       referenceRange: row['reference_range'] ? String(row['reference_range']) : undefined,
       flag: row['flag'] as LabResult['flag'],
@@ -617,6 +736,679 @@ export class ClinicalStore {
     }));
   }
 
+  // ─── Research Findings ──────────────────────────────────────────────────
+
+  /**
+   * Add a research finding with three-layer dedup:
+   * 1. If external_id + external_id_type match an existing record for this patient → skip (return existing ID)
+   * 2. If no external_id, compute content_hash(source + title + date) → skip if hash matches
+   * 3. Otherwise insert as new record
+   *
+   * Returns the ID of the inserted or existing record, and whether it was a duplicate.
+   */
+  async addResearchFinding(finding: ResearchFinding): Promise<{ id: string; duplicate: boolean }> {
+    await this.ensureInitialized();
+
+    // Layer 1: Dedup by external ID (PMID, NCT, ORPHA, OMIM, etc.)
+    if (finding.externalId && finding.externalIdType) {
+      const existing = await this.client.execute({
+        sql: `SELECT id FROM research_findings WHERE patient_id = ? AND external_id = ? AND external_id_type = ?`,
+        args: [finding.patientId, finding.externalId, finding.externalIdType],
+      });
+      const existingRow = existing.rows[0];
+      if (existingRow) {
+        logger.debug('Research finding dedup: external ID match', {
+          externalId: finding.externalId,
+          existingId: String(existingRow['id']),
+        });
+        return { id: String(existingRow['id']), duplicate: true };
+      }
+    }
+
+    // Layer 2: Dedup by content hash (for findings without external IDs)
+    const hash = computeFindingHash(finding);
+    if (!finding.externalId) {
+      const existing = await this.client.execute({
+        sql: `SELECT id FROM research_findings WHERE patient_id = ? AND content_hash = ? AND external_id IS NULL`,
+        args: [finding.patientId, hash],
+      });
+      const existingRow = existing.rows[0];
+      if (existingRow) {
+        logger.debug('Research finding dedup: content hash match', {
+          hash,
+          existingId: String(existingRow['id']),
+        });
+        return { id: String(existingRow['id']), duplicate: true };
+      }
+    }
+
+    // Layer 3: Insert new record
+    await this.client.execute(this.findingStatement(finding, hash));
+    return { id: finding.id, duplicate: false };
+  }
+
+  async addResearchFindings(
+    findings: ResearchFinding[],
+  ): Promise<{ inserted: number; duplicates: number }> {
+    await this.ensureInitialized();
+    if (findings.length === 0) return { inserted: 0, duplicates: 0 };
+
+    let inserted = 0;
+    let duplicates = 0;
+
+    for (const f of findings) {
+      const result = await this.addResearchFinding(f);
+      if (result.duplicate) {
+        duplicates++;
+      } else {
+        inserted++;
+      }
+    }
+
+    return { inserted, duplicates };
+  }
+
+  /**
+   * Check if a research finding already exists by external ID or content hash.
+   * Useful for pre-flight dedup checks before constructing expensive objects.
+   */
+  async findingExists(
+    patientId: string,
+    params: {
+      externalId?: string;
+      externalIdType?: string;
+      source?: string;
+      title?: string;
+      date?: string;
+    },
+  ): Promise<{ exists: boolean; existingId?: string }> {
+    await this.ensureInitialized();
+
+    // Check by external ID first
+    if (params.externalId && params.externalIdType) {
+      const existing = await this.client.execute({
+        sql: `SELECT id FROM research_findings WHERE patient_id = ? AND external_id = ? AND external_id_type = ?`,
+        args: [patientId, params.externalId, params.externalIdType],
+      });
+      const row = existing.rows[0];
+      if (row) {
+        return { exists: true, existingId: String(row['id']) };
+      }
+    }
+
+    // Check by content hash
+    if (params.source && params.title && params.date) {
+      const hash = computeFindingHash({
+        source: params.source,
+        title: params.title,
+        date: params.date,
+      });
+      const existing = await this.client.execute({
+        sql: `SELECT id FROM research_findings WHERE patient_id = ? AND content_hash = ? AND external_id IS NULL`,
+        args: [patientId, hash],
+      });
+      const row = existing.rows[0];
+      if (row) {
+        return { exists: true, existingId: String(row['id']) };
+      }
+    }
+
+    return { exists: false };
+  }
+
+  /**
+   * Check if recent findings already cover a set of query terms.
+   * Returns which terms are covered and what percentage of the query is already researched.
+   */
+  async getRecentFindingsForQuery(params: {
+    patientId: string;
+    queryTerms: string[];
+    maxAgeDays?: number;
+  }): Promise<{ coveredTerms: string[]; findings: ResearchFinding[]; coveragePercent: number }> {
+    await this.ensureInitialized();
+    const maxAge = params.maxAgeDays ?? 30;
+    const cutoffDate = new Date(Date.now() - maxAge * 86_400_000).toISOString().split('T')[0] ?? '';
+
+    const result = await this.client.execute({
+      sql: `SELECT * FROM research_findings WHERE patient_id = ? AND date >= ? ORDER BY date DESC`,
+      args: [params.patientId, cutoffDate],
+    });
+
+    const findings = result.rows.map(mapRowToFinding);
+
+    // Check which query terms are covered by existing findings
+    const coveredTerms: string[] = [];
+    const normalizedTerms = params.queryTerms.map((t) => t.toLowerCase());
+
+    for (const term of normalizedTerms) {
+      const isCovered = findings.some(
+        (f) =>
+          f.title.toLowerCase().includes(term) ||
+          f.summary.toLowerCase().includes(term) ||
+          (f.rawData?.toLowerCase().includes(term) ?? false),
+      );
+      if (isCovered) coveredTerms.push(term);
+    }
+
+    const coveragePercent =
+      normalizedTerms.length > 0 ? (coveredTerms.length / normalizedTerms.length) * 100 : 0;
+
+    return { coveredTerms, findings, coveragePercent };
+  }
+
+  private findingStatement(f: ResearchFinding, hash?: string) {
+    const contentHash = hash ?? computeFindingHash(f);
+    return {
+      sql: `INSERT OR REPLACE INTO research_findings
+                (id, patient_id, source, source_tool, external_id, external_id_type,
+                 title, summary, url, relevance, evidence_level, research_query_id,
+                 date, raw_data, evidence_tier, validation_status, source_credibility, content_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        f.id,
+        f.patientId,
+        f.source,
+        f.sourceTool ?? null,
+        f.externalId ?? null,
+        f.externalIdType ?? null,
+        f.title,
+        f.summary,
+        f.url ?? null,
+        f.relevance ?? null,
+        f.evidenceLevel ?? null,
+        f.researchQueryId ?? null,
+        f.date,
+        f.rawData ?? null,
+        f.evidenceTier ?? null,
+        f.validationStatus ?? null,
+        f.sourceCredibility ?? null,
+        contentHash,
+      ],
+    };
+  }
+
+  async queryFindings(params: {
+    patientId: string;
+    source?: string;
+    externalIdType?: string;
+    evidenceLevel?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    queryId?: string;
+  }): Promise<ResearchFinding[]> {
+    await this.ensureInitialized();
+    const conditions = ['patient_id = ?'];
+    const args: (string | number | null)[] = [params.patientId];
+
+    if (params.source) {
+      conditions.push('source = ?');
+      args.push(params.source);
+    }
+    if (params.externalIdType) {
+      conditions.push('external_id_type = ?');
+      args.push(params.externalIdType);
+    }
+    if (params.evidenceLevel) {
+      conditions.push('evidence_level = ?');
+      args.push(params.evidenceLevel);
+    }
+    if (params.dateFrom) {
+      conditions.push('date >= ?');
+      args.push(params.dateFrom);
+    }
+    if (params.dateTo) {
+      conditions.push('date <= ?');
+      args.push(params.dateTo);
+    }
+    if (params.queryId) {
+      conditions.push('research_query_id = ?');
+      args.push(params.queryId);
+    }
+
+    const result = await this.client.execute({
+      sql: `SELECT * FROM research_findings WHERE ${conditions.join(' AND ')} ORDER BY date DESC`,
+      args,
+    });
+
+    return result.rows.map(mapRowToFinding);
+  }
+
+  // ─── Research Queries ──────────────────────────────────────────────────
+
+  async addResearchQuery(query: ResearchQuery): Promise<void> {
+    await this.ensureInitialized();
+    await this.client.execute({
+      sql: `INSERT OR REPLACE INTO research_queries
+                (id, patient_id, query, tool_used, agent, result_count, finding_ids,
+                 synthesis, gaps, suggested_follow_up, stage, date, duration_ms,
+                 evidence_tier, validation_status, source_credibility)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        query.id,
+        query.patientId,
+        query.query,
+        query.toolUsed,
+        query.agent ?? null,
+        query.resultCount ?? 0,
+        query.findingIds ? JSON.stringify(query.findingIds) : null,
+        query.synthesis ?? null,
+        query.gaps ? JSON.stringify(query.gaps) : null,
+        query.suggestedFollowUp ? JSON.stringify(query.suggestedFollowUp) : null,
+        query.stage ?? null,
+        query.date,
+        query.durationMs ?? null,
+        query.evidenceTier ?? null,
+        query.validationStatus ?? null,
+        query.sourceCredibility ?? null,
+      ],
+    });
+  }
+
+  async queryResearchQueries(params: {
+    patientId: string;
+    toolUsed?: string;
+    agent?: string;
+    stage?: number;
+    dateFrom?: string;
+    dateTo?: string;
+  }): Promise<ResearchQuery[]> {
+    await this.ensureInitialized();
+    const conditions = ['patient_id = ?'];
+    const args: (string | number | null)[] = [params.patientId];
+
+    if (params.toolUsed) {
+      conditions.push('tool_used = ?');
+      args.push(params.toolUsed);
+    }
+    if (params.agent) {
+      conditions.push('agent = ?');
+      args.push(params.agent);
+    }
+    if (params.stage !== undefined) {
+      conditions.push('stage = ?');
+      args.push(params.stage);
+    }
+    if (params.dateFrom) {
+      conditions.push('date >= ?');
+      args.push(params.dateFrom);
+    }
+    if (params.dateTo) {
+      conditions.push('date <= ?');
+      args.push(params.dateTo);
+    }
+
+    const result = await this.client.execute({
+      sql: `SELECT * FROM research_queries WHERE ${conditions.join(' AND ')} ORDER BY date DESC`,
+      args,
+    });
+
+    return result.rows.map(mapRowToResearchQuery);
+  }
+
+  // ─── Research Hypotheses ───────────────────────────────────────────────
+
+  /**
+   * Add a hypothesis with dedup:
+   * - If same patient + name + version already exists → skip (return existing ID)
+   * - If version > 1, supersede the previous version
+   */
+  async addHypothesis(hypothesis: ResearchHypothesis): Promise<{ id: string; duplicate: boolean }> {
+    await this.ensureInitialized();
+
+    // Dedup: check if same patient + name + version already exists
+    const version = hypothesis.version ?? 1;
+    const dupCheck = await this.client.execute({
+      sql: `SELECT id FROM research_hypotheses WHERE patient_id = ? AND name = ? AND version = ?`,
+      args: [hypothesis.patientId, hypothesis.name, version],
+    });
+    const dupRow = dupCheck.rows[0];
+    if (dupRow) {
+      logger.debug('Hypothesis dedup: same name+version exists', {
+        name: hypothesis.name,
+        version,
+        existingId: String(dupRow['id']),
+      });
+      return { id: String(dupRow['id']), duplicate: true };
+    }
+
+    // If a hypothesis with the same name exists, supersede it
+    if (version > 1) {
+      const existing = await this.client.execute({
+        sql: `SELECT id FROM research_hypotheses
+                    WHERE patient_id = ? AND name = ? AND superseded_by IS NULL
+                    ORDER BY version DESC LIMIT 1`,
+        args: [hypothesis.patientId, hypothesis.name],
+      });
+
+      const prevRow = existing.rows[0];
+      if (prevRow) {
+        await this.client.execute({
+          sql: `UPDATE research_hypotheses SET superseded_by = ? WHERE id = ?`,
+          args: [hypothesis.id, String(prevRow['id'])],
+        });
+      }
+    }
+
+    await this.client.execute({
+      sql: `INSERT OR REPLACE INTO research_hypotheses
+                (id, patient_id, name, icd_code, probability_low, probability_high,
+                 advocate_case, skeptic_case, arbiter_verdict,
+                 evidence_tier, certainty_level, stage, version, superseded_by, date,
+                 validation_status, source_credibility)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        hypothesis.id,
+        hypothesis.patientId,
+        hypothesis.name,
+        hypothesis.icdCode ?? null,
+        hypothesis.probabilityLow ?? null,
+        hypothesis.probabilityHigh ?? null,
+        hypothesis.advocateCase ?? null,
+        hypothesis.skepticCase ?? null,
+        hypothesis.arbiterVerdict ?? null,
+        hypothesis.evidenceTier ?? null,
+        hypothesis.certaintyLevel ?? null,
+        hypothesis.stage ?? null,
+        hypothesis.version ?? 1,
+        hypothesis.supersededBy ?? null,
+        hypothesis.date,
+        hypothesis.validationStatus ?? null,
+        hypothesis.sourceCredibility ?? null,
+      ],
+    });
+    return { id: hypothesis.id, duplicate: false };
+  }
+
+  async queryHypotheses(params: {
+    patientId: string;
+    name?: string;
+    certaintyLevel?: string;
+    latestOnly?: boolean;
+  }): Promise<ResearchHypothesis[]> {
+    await this.ensureInitialized();
+    const conditions = ['patient_id = ?'];
+    const args: (string | number | null)[] = [params.patientId];
+
+    if (params.name) {
+      conditions.push('name LIKE ?');
+      args.push(`%${params.name}%`);
+    }
+    if (params.certaintyLevel) {
+      conditions.push('certainty_level = ?');
+      args.push(params.certaintyLevel);
+    }
+    if (params.latestOnly !== false) {
+      // Default: only return latest (non-superseded) versions
+      conditions.push('superseded_by IS NULL');
+    }
+
+    const result = await this.client.execute({
+      sql: `SELECT * FROM research_hypotheses WHERE ${conditions.join(' AND ')} ORDER BY probability_high DESC, date DESC`,
+      args,
+    });
+
+    return result.rows.map(mapRowToHypothesis);
+  }
+
+  // ─── Hypothesis Timeline ─────────────────────────────────────────────
+
+  /**
+   * Get full version chain for a hypothesis — every version with its probability
+   * snapshot, triggering evidence, and date — enabling "How did our thinking evolve?"
+   */
+  async getHypothesisTimeline(params: { patientId: string; name: string }): Promise<{
+    name: string;
+    versions: Array<ResearchHypothesis & { evidenceLinks: HypothesisEvidenceLink[] }>;
+    confidenceTrajectory: Array<{
+      version: number;
+      date: string;
+      probabilityLow: number;
+      probabilityHigh: number;
+      certaintyLevel: string;
+    }>;
+    directionChanges: number;
+  }> {
+    await this.ensureInitialized();
+
+    // Fetch ALL versions (not just latest) ordered by version ASC
+    const result = await this.client.execute({
+      sql: `SELECT * FROM research_hypotheses WHERE patient_id = ? AND name = ? ORDER BY version ASC`,
+      args: [params.patientId, params.name],
+    });
+
+    const hypotheses = result.rows.map(mapRowToHypothesis);
+
+    // For each version, fetch evidence links
+    const versions = await Promise.all(
+      hypotheses.map(async (h) => {
+        const links = await this.queryEvidenceLinks({ hypothesisId: h.id });
+        return { ...h, evidenceLinks: links };
+      }),
+    );
+
+    // Build confidence trajectory
+    const confidenceTrajectory = hypotheses.map((h) => ({
+      version: h.version ?? 1,
+      date: h.date,
+      probabilityLow: h.probabilityLow ?? 0,
+      probabilityHigh: h.probabilityHigh ?? 0,
+      certaintyLevel: h.certaintyLevel ?? 'SPECULATIVE',
+    }));
+
+    // Count direction changes (probability midpoint reversals)
+    let directionChanges = 0;
+    for (let i = 2; i < confidenceTrajectory.length; i++) {
+      const prev = confidenceTrajectory[i - 1];
+      const curr = confidenceTrajectory[i];
+      const prevPrev = confidenceTrajectory[i - 2];
+      if (!(prev && curr && prevPrev)) continue;
+      const prevMid = (prev.probabilityLow + prev.probabilityHigh) / 2;
+      const currMid = (curr.probabilityLow + curr.probabilityHigh) / 2;
+      const prevPrevMid = (prevPrev.probabilityLow + prevPrev.probabilityHigh) / 2;
+      const prevDirection = prevMid - prevPrevMid;
+      const currDirection = currMid - prevMid;
+      if (prevDirection * currDirection < 0) directionChanges++;
+    }
+
+    return {
+      name: params.name,
+      versions,
+      confidenceTrajectory,
+      directionChanges,
+    };
+  }
+
+  // ─── Evidence Links ────────────────────────────────────────────────────
+
+  /**
+   * Add an evidence link with dedup:
+   * Same hypothesis + finding/clinical record + direction = duplicate.
+   */
+  async addEvidenceLink(link: HypothesisEvidenceLink): Promise<{ id: string; duplicate: boolean }> {
+    await this.ensureInitialized();
+
+    // Dedup: check for existing link with same hypothesis + evidence + direction
+    const evidenceColumn = link.findingId ? 'finding_id' : 'clinical_record_id';
+    const evidenceValue = link.findingId ?? link.clinicalRecordId;
+
+    if (evidenceValue) {
+      const existing = await this.client.execute({
+        sql: `SELECT id FROM hypothesis_evidence_links WHERE hypothesis_id = ? AND ${evidenceColumn} = ? AND direction = ?`,
+        args: [link.hypothesisId, evidenceValue, link.direction],
+      });
+      const row = existing.rows[0];
+      if (row) {
+        logger.debug('Evidence link dedup: same hypothesis+evidence+direction', {
+          hypothesisId: link.hypothesisId,
+          evidenceValue,
+          existingId: String(row['id']),
+        });
+        return { id: String(row['id']), duplicate: true };
+      }
+    }
+
+    await this.client.execute({
+      sql: `INSERT OR REPLACE INTO hypothesis_evidence_links
+                (id, patient_id, hypothesis_id, finding_id, clinical_record_id, clinical_record_type,
+                 direction, claim, confidence, tier, date, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        link.id,
+        link.patientId,
+        link.hypothesisId,
+        link.findingId ?? null,
+        link.clinicalRecordId ?? null,
+        link.clinicalRecordType ?? null,
+        link.direction,
+        link.claim,
+        link.confidence ?? null,
+        link.tier ?? null,
+        link.date,
+        link.notes ?? null,
+      ],
+    });
+    return { id: link.id, duplicate: false };
+  }
+
+  async queryEvidenceLinks(params: {
+    hypothesisId?: string;
+    findingId?: string;
+    clinicalRecordId?: string;
+    patientId?: string;
+  }): Promise<HypothesisEvidenceLink[]> {
+    await this.ensureInitialized();
+    const conditions: string[] = [];
+    const args: (string | number | null)[] = [];
+
+    if (params.hypothesisId) {
+      conditions.push('hypothesis_id = ?');
+      args.push(params.hypothesisId);
+    }
+    if (params.findingId) {
+      conditions.push('finding_id = ?');
+      args.push(params.findingId);
+    }
+    if (params.clinicalRecordId) {
+      conditions.push('clinical_record_id = ?');
+      args.push(params.clinicalRecordId);
+    }
+    if (params.patientId) {
+      conditions.push('patient_id = ?');
+      args.push(params.patientId);
+    }
+
+    if (conditions.length === 0) {
+      return [];
+    }
+
+    const result = await this.client.execute({
+      sql: `SELECT * FROM hypothesis_evidence_links WHERE ${conditions.join(' AND ')} ORDER BY date DESC`,
+      args,
+    });
+
+    return result.rows.map(mapRowToEvidenceLink);
+  }
+
+  async getHypothesisWithEvidence(
+    hypothesisId: string,
+  ): Promise<{ hypothesis: ResearchHypothesis; links: HypothesisEvidenceLink[] } | null> {
+    await this.ensureInitialized();
+
+    const hResult = await this.client.execute({
+      sql: `SELECT * FROM research_hypotheses WHERE id = ?`,
+      args: [hypothesisId],
+    });
+
+    const hRow = hResult.rows[0];
+    if (!hRow) return null;
+
+    const links = await this.queryEvidenceLinks({ hypothesisId });
+    return { hypothesis: mapRowToHypothesis(hRow), links };
+  }
+
+  async getPatientResearchSummary(patientId: string): Promise<ResearchSummary> {
+    await this.ensureInitialized();
+
+    const [findings, queries, hypotheses, links] = await Promise.all([
+      this.client.execute({
+        sql: `SELECT COUNT(*) as cnt FROM research_findings WHERE patient_id = ?`,
+        args: [patientId],
+      }),
+      this.client.execute({
+        sql: `SELECT COUNT(*) as cnt FROM research_queries WHERE patient_id = ?`,
+        args: [patientId],
+      }),
+      this.client.execute({
+        sql: `SELECT COUNT(*) as cnt FROM research_hypotheses WHERE patient_id = ? AND superseded_by IS NULL`,
+        args: [patientId],
+      }),
+      this.client.execute({
+        sql: `SELECT COUNT(*) as cnt FROM hypothesis_evidence_links WHERE patient_id = ?`,
+        args: [patientId],
+      }),
+    ]);
+
+    // Top sources by finding count
+    const sourceResult = await this.client.execute({
+      sql: `SELECT source, COUNT(*) as cnt FROM research_findings WHERE patient_id = ? GROUP BY source ORDER BY cnt DESC LIMIT 10`,
+      args: [patientId],
+    });
+
+    // Latest dates
+    const latestDates = await Promise.all([
+      this.client.execute({
+        sql: `SELECT date FROM research_queries WHERE patient_id = ? ORDER BY date DESC LIMIT 1`,
+        args: [patientId],
+      }),
+      this.client.execute({
+        sql: `SELECT date FROM research_findings WHERE patient_id = ? ORDER BY date DESC LIMIT 1`,
+        args: [patientId],
+      }),
+    ]);
+
+    const latestQueryRow = latestDates[0]?.rows[0];
+    const latestFindingRow = latestDates[1]?.rows[0];
+
+    return {
+      patientId,
+      findingCount: Number(findings.rows[0]?.['cnt'] ?? 0),
+      queryCount: Number(queries.rows[0]?.['cnt'] ?? 0),
+      hypothesisCount: Number(hypotheses.rows[0]?.['cnt'] ?? 0),
+      evidenceLinkCount: Number(links.rows[0]?.['cnt'] ?? 0),
+      topSources: sourceResult.rows.map((row) => ({
+        source: String(row['source']),
+        count: Number(row['cnt']),
+      })),
+      latestQueryDate: latestQueryRow ? String(latestQueryRow['date']) : undefined,
+      latestFindingDate: latestFindingRow ? String(latestFindingRow['date']) : undefined,
+    };
+  }
+
+  // ─── Finding Validation Update ──────────────────────────────────────────
+
+  /**
+   * Update validation status and credibility for a research finding.
+   * Used by citation-verifier to persist verification results.
+   */
+  async updateFindingValidation(
+    findingId: string,
+    status: string,
+    credibility?: number,
+  ): Promise<void> {
+    await this.ensureInitialized();
+    if (credibility !== undefined) {
+      await this.client.execute({
+        sql: `UPDATE research_findings SET validation_status = ?, source_credibility = ? WHERE id = ?`,
+        args: [status, Math.round(credibility * 100), findingId],
+      });
+    } else {
+      await this.client.execute({
+        sql: `UPDATE research_findings SET validation_status = ? WHERE id = ?`,
+        args: [status, findingId],
+      });
+    }
+  }
+
   // ─── Cleanup ──────────────────────────────────────────────────────────
 
   async close(): Promise<void> {
@@ -661,6 +1453,130 @@ function mapRowToTreatmentTrial(row: Record<string, unknown>): TreatmentTrial {
     adequateTrial: row['adequate_trial'] === null ? undefined : Boolean(row['adequate_trial']),
     ...mapProvenance(row),
   };
+}
+
+// ─── Research Row Mapping Helpers ──────────────────────────────────────────
+
+function optNum(val: unknown): number | undefined {
+  if (val === null || val === undefined) return undefined;
+  const n = Number(val);
+  return Number.isNaN(n) ? undefined : n;
+}
+
+function mapRowToFinding(row: Record<string, unknown>): ResearchFinding {
+  return {
+    id: String(row['id']),
+    patientId: String(row['patient_id']),
+    source: String(row['source']),
+    sourceTool: optStr(row['source_tool']),
+    externalId: optStr(row['external_id']),
+    externalIdType: optStr(row['external_id_type']) as ResearchFinding['externalIdType'],
+    title: String(row['title']),
+    summary: String(row['summary']),
+    url: optStr(row['url']),
+    relevance: optNum(row['relevance']),
+    evidenceLevel: optStr(row['evidence_level']) as ResearchFinding['evidenceLevel'],
+    researchQueryId: optStr(row['research_query_id']),
+    date: String(row['date']),
+    rawData: optStr(row['raw_data']),
+    ...mapProvenance(row),
+  };
+}
+
+function mapRowToResearchQuery(row: Record<string, unknown>): ResearchQuery {
+  return {
+    id: String(row['id']),
+    patientId: String(row['patient_id']),
+    query: String(row['query']),
+    toolUsed: String(row['tool_used']),
+    agent: optStr(row['agent']),
+    resultCount: optNum(row['result_count']),
+    findingIds: row['finding_ids']
+      ? (JSON.parse(String(row['finding_ids'])) as string[])
+      : undefined,
+    synthesis: optStr(row['synthesis']),
+    gaps: row['gaps'] ? (JSON.parse(String(row['gaps'])) as string[]) : undefined,
+    suggestedFollowUp: row['suggested_follow_up']
+      ? (JSON.parse(String(row['suggested_follow_up'])) as string[])
+      : undefined,
+    stage: optNum(row['stage']),
+    date: String(row['date']),
+    durationMs: optNum(row['duration_ms']),
+    ...mapProvenance(row),
+  };
+}
+
+function mapRowToHypothesis(row: Record<string, unknown>): ResearchHypothesis {
+  return {
+    id: String(row['id']),
+    patientId: String(row['patient_id']),
+    name: String(row['name']),
+    icdCode: optStr(row['icd_code']),
+    probabilityLow: optNum(row['probability_low']),
+    probabilityHigh: optNum(row['probability_high']),
+    advocateCase: optStr(row['advocate_case']),
+    skepticCase: optStr(row['skeptic_case']),
+    arbiterVerdict: optStr(row['arbiter_verdict']),
+    evidenceTier: optStr(row['evidence_tier']) as ResearchHypothesis['evidenceTier'],
+    certaintyLevel: optStr(row['certainty_level']) as ResearchHypothesis['certaintyLevel'],
+    stage: optNum(row['stage']),
+    version: optNum(row['version']),
+    supersededBy: optStr(row['superseded_by']),
+    date: String(row['date']),
+    validationStatus: optStr(row['validation_status']) as ResearchHypothesis['validationStatus'],
+    sourceCredibility: optNum(row['source_credibility']),
+  };
+}
+
+function mapRowToEvidenceLink(row: Record<string, unknown>): HypothesisEvidenceLink {
+  return {
+    id: String(row['id']),
+    patientId: String(row['patient_id']),
+    hypothesisId: String(row['hypothesis_id']),
+    findingId: optStr(row['finding_id']),
+    clinicalRecordId: optStr(row['clinical_record_id']),
+    clinicalRecordType: optStr(
+      row['clinical_record_type'],
+    ) as HypothesisEvidenceLink['clinicalRecordType'],
+    direction: String(row['direction']) as HypothesisEvidenceLink['direction'],
+    claim: String(row['claim']),
+    confidence: optNum(row['confidence']),
+    tier: optStr(row['tier']) as HypothesisEvidenceLink['tier'],
+    date: String(row['date']),
+    notes: optStr(row['notes']),
+  };
+}
+
+// ─── Value Parsing ────────────────────────────────────────────────────────
+
+/**
+ * Parse a lab value from the database, handling European number formats
+ * (space as thousands separator, comma as decimal separator) and
+ * stripping non-numeric prefixes like "< " or "> ".
+ */
+function parseLabValue(raw: unknown): string | number {
+  const s = String(raw ?? '').trim();
+  if (s === '') return s;
+
+  // Strip comparison prefixes but keep the value numeric
+  const stripped = s.replace(/^[<>]=?\s*/, '');
+
+  // Try direct parse first (covers "3.5", "0.07" etc.)
+  const direct = Number(stripped);
+  if (!Number.isNaN(direct)) return direct;
+
+  // Handle European thousands separator: "1 061.00" → "1061.00"
+  const noSpaces = stripped.replace(/\s/g, '');
+  const spaceParsed = Number(noSpaces);
+  if (!Number.isNaN(spaceParsed)) return spaceParsed;
+
+  // Handle comma-as-decimal: "14,2" → "14.2"
+  const commaFixed = noSpaces.replace(',', '.');
+  const commaParsed = Number(commaFixed);
+  if (!Number.isNaN(commaParsed)) return commaParsed;
+
+  // Non-numeric (e.g., "ujemny (negative)") — return as string
+  return s;
 }
 
 // ─── Trend Computation Helpers ────────────────────────────────────────────
@@ -729,6 +1645,18 @@ function generateClinicalNote(
   }
 
   return parts.length > 0 ? parts.join('; ') : undefined;
+}
+
+// ─── Content Hash ─────────────────────────────────────────────────────────
+
+/**
+ * Compute a stable content fingerprint for a research finding.
+ * Uses SHA-256 of normalized (source + title + date) — three fields
+ * that uniquely identify a finding even without an external ID.
+ */
+function computeFindingHash(f: { source: string; title: string; date: string }): string {
+  const input = `${f.source.trim().toLowerCase()}|${f.title.trim().toLowerCase()}|${f.date.trim()}`;
+  return createHash('sha256').update(input).digest('hex').slice(0, 16);
 }
 
 // ─── Singleton ────────────────────────────────────────────────────────────

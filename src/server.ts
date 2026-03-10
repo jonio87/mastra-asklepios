@@ -18,7 +18,7 @@ const A2A_PORT = Number(process.env['A2A_PORT'] ?? 4113);
 
 // ─── MCP HTTP Server ──────────────────────────────────────────────────────────
 
-const mcpServer = createAsklepiosMcpServer();
+const mcpServer = await createAsklepiosMcpServer();
 const mcpTransport = new StreamableHTTPServerTransport({
   sessionIdGenerator: () => crypto.randomUUID(),
 });

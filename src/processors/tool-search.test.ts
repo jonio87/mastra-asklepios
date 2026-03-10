@@ -3,8 +3,8 @@
  *
  * Note: The ToolSearchProcessor import from @mastra/core/processors
  * triggers an ESM/CJS compatibility issue with execa in the Jest
- * environment. These tests use dynamic import with error handling
- * to validate configuration where possible.
+ * environment. These tests use source file analysis to validate
+ * configuration where possible.
  *
  * Full integration testing of BM25 search and tool loading is
  * verified via manual testing with the running agent.
@@ -18,10 +18,7 @@ function readSource(): string {
 }
 
 describe('clinicalToolSearch processor', () => {
-  const expectedTools = [
-    'pubmedSearch',
-    'orphanetLookup',
-    'clinvarLookup',
+  const nativeTools = [
     'deepResearch',
     'hpoMapper',
     'documentParser',
@@ -35,16 +32,32 @@ describe('clinicalToolSearch processor', () => {
     expect(content).toContain('clinicalToolSearch');
   });
 
-  it('configures all 8 non-essential tools for lazy loading', () => {
+  it('configures 5 Asklepios-native tools for lazy loading', () => {
     const content = readSource();
-    for (const tool of expectedTools) {
+    for (const tool of nativeTools) {
       expect(content).toContain(tool);
     }
   });
 
-  it('configures search with topK=3 and minScore=0.1', () => {
+  it('spreads biomedical MCP tools into the tool pool', () => {
     const content = readSource();
-    expect(content).toContain('topK: 3');
+    expect(content).toContain('getBiomedicalTools');
+    expect(content).toContain('...biomedicalTools');
+  });
+
+  it('does not include deleted hand-built biomedical tools', () => {
+    const content = readSource();
+    // These tools were deleted — replaced by MCP servers
+    const deletedTools = ['pubmedSearch', 'orphanetLookup', 'clinvarLookup'];
+    for (const tool of deletedTools) {
+      const toolKeyPattern = new RegExp(`^\\s+${tool}:`, 'm');
+      expect(toolKeyPattern.test(content)).toBe(false);
+    }
+  });
+
+  it('configures search with topK=5 and minScore=0.1', () => {
+    const content = readSource();
+    expect(content).toContain('topK: 5');
     expect(content).toContain('minScore: 0.1');
   });
 
@@ -65,9 +78,7 @@ describe('clinicalToolSearch processor', () => {
   it('imports from correct module paths', () => {
     const content = readSource();
     expect(content).toContain("from '@mastra/core/processors'");
-    expect(content).toContain("from '../tools/pubmed-search.js'");
-    expect(content).toContain("from '../tools/orphanet-lookup.js'");
-    expect(content).toContain("from '../tools/clinvar-lookup.js'");
+    expect(content).toContain("from '../clients/biomedical-mcp.js'");
     expect(content).toContain("from '../tools/deep-research.js'");
     expect(content).toContain("from '../tools/hpo-mapper.js'");
     expect(content).toContain("from '../tools/document-parser.js'");

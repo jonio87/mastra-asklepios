@@ -176,6 +176,41 @@ async function seedTestData() {
     content: 'TCC convergence explains pain migration',
     confidence: 70,
   });
+
+  // Hypotheses (for hypothesis-timeline)
+  await store.addHypothesis({
+    id: 'hyp-qt-001',
+    patientId: TEST_PATIENT,
+    name: 'Cervicogenic Pain Syndrome',
+    probabilityLow: 20,
+    probabilityHigh: 40,
+    certaintyLevel: 'WEAK',
+    version: 1,
+    date: '2024-01-01',
+    evidenceTier: 'T3-ai-inferred',
+  });
+  await store.addHypothesis({
+    id: 'hyp-qt-002',
+    patientId: TEST_PATIENT,
+    name: 'Cervicogenic Pain Syndrome',
+    probabilityLow: 45,
+    probabilityHigh: 65,
+    certaintyLevel: 'MODERATE',
+    version: 2,
+    date: '2024-06-15',
+    evidenceTier: 'T2-patient-reported',
+  });
+  await store.addHypothesis({
+    id: 'hyp-qt-003',
+    patientId: TEST_PATIENT,
+    name: 'Cervicogenic Pain Syndrome',
+    probabilityLow: 55,
+    probabilityHigh: 75,
+    certaintyLevel: 'STRONG',
+    version: 3,
+    date: '2025-01-10',
+    evidenceTier: 'T1-specialist',
+  });
 }
 
 describe('queryDataTool', () => {
@@ -500,6 +535,65 @@ describe('queryDataTool', () => {
       // biome-ignore lint/suspicious/noExplicitAny: test assertion
       const data = result.data as any;
       expect(data.recentReports.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  // ─── Hypothesis Timeline Query ────────────────────────────────────
+
+  describe('type: hypothesis-timeline', () => {
+    it('returns full version chain for a hypothesis', async () => {
+      const result = await queryDataTool.execute({
+        type: 'hypothesis-timeline',
+        patientId: TEST_PATIENT,
+        name: 'Cervicogenic Pain Syndrome',
+      });
+
+      // biome-ignore lint/suspicious/noExplicitAny: test assertion
+      const data = result.data as any;
+      expect(data.name).toBe('Cervicogenic Pain Syndrome');
+      expect(data.versions.length).toBe(3);
+    });
+
+    it('includes confidence trajectory', async () => {
+      const result = await queryDataTool.execute({
+        type: 'hypothesis-timeline',
+        patientId: TEST_PATIENT,
+        name: 'Cervicogenic Pain Syndrome',
+      });
+
+      // biome-ignore lint/suspicious/noExplicitAny: test assertion
+      const data = result.data as any;
+      expect(data.confidenceTrajectory.length).toBe(3);
+      expect(data.confidenceTrajectory[0]?.version).toBe(1);
+      expect(data.confidenceTrajectory[0]?.probabilityLow).toBe(20);
+      expect(data.confidenceTrajectory[2]?.version).toBe(3);
+      expect(data.confidenceTrajectory[2]?.probabilityHigh).toBe(75);
+    });
+
+    it('detects monotonically rising confidence (zero direction changes)', async () => {
+      const result = await queryDataTool.execute({
+        type: 'hypothesis-timeline',
+        patientId: TEST_PATIENT,
+        name: 'Cervicogenic Pain Syndrome',
+      });
+
+      // biome-ignore lint/suspicious/noExplicitAny: test assertion
+      const data = result.data as any;
+      expect(data.directionChanges).toBe(0);
+    });
+
+    it('returns empty timeline for non-existent hypothesis', async () => {
+      const result = await queryDataTool.execute({
+        type: 'hypothesis-timeline',
+        patientId: TEST_PATIENT,
+        name: 'NonExistent Hypothesis',
+      });
+
+      // biome-ignore lint/suspicious/noExplicitAny: test assertion
+      const data = result.data as any;
+      expect(data.versions.length).toBe(0);
+      expect(data.confidenceTrajectory.length).toBe(0);
+      expect(data.directionChanges).toBe(0);
     });
   });
 });
