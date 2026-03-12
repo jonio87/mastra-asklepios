@@ -177,7 +177,7 @@ describe('DocumentStore', () => {
       createMockEmbedder(),
     );
 
-    await store.ingestDocument('Test', { patientId: 'p1', documentType: 'lab-report' });
+    await store.ingestDocument('Test', { patientId: 'p1', documentType: 'diagnostic-report' });
 
     expect(vector.upsert).toHaveBeenCalled();
     const upsertCall = (vector.upsert as jest.Mock).mock.calls[0][0] as StoredEntry;
@@ -192,11 +192,11 @@ describe('DocumentStore', () => {
       createMockEmbedder(),
     );
 
-    await store.ingestDocument('Test', { patientId: 'p1', documentType: 'imaging-report' });
+    await store.ingestDocument('Test', { patientId: 'p1', documentType: 'diagnostic-report' });
 
     await store.queryDocuments('imaging findings', {
       patientId: 'p1',
-      documentType: 'imaging-report',
+      documentType: 'diagnostic-report',
       topK: 5,
     });
 
@@ -205,7 +205,7 @@ describe('DocumentStore', () => {
       // biome-ignore lint/style/useNamingConvention: MongoDB $eq operator
       patientId: { $eq: 'p1' },
       // biome-ignore lint/style/useNamingConvention: MongoDB $eq operator
-      documentType: { $eq: 'imaging-report' },
+      documentType: { $eq: 'diagnostic-report' },
     });
   });
 });

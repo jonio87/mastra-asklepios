@@ -19,12 +19,12 @@ export function registerWorkflowTools(server: McpServer): void {
         patientId: z.string().describe('Patient ID for this intake'),
         documentType: z
           .enum([
-            'medical-record',
-            'lab-report',
-            'genetic-report',
+            'diagnostic-report',
+            'procedure-note',
             'clinical-note',
-            'referral',
-            'unknown',
+            'patient-document',
+            'research-paper',
+            'other',
           ])
           .optional()
           .describe('Type of clinical document (default: auto-detected)'),

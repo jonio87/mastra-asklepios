@@ -17,7 +17,7 @@ export const sourceDocTypeEnum = z.enum([
   'lab_result',
   'consultation',
   'imaging_report',
-  'abdominal',
+  'procedure', // FHIR Procedure — gastroscopy, colonoscopy, SIBO (was: abdominal)
   'narrative',
   'external',
   'other', // Non-medical files (DICOM viewer docs, etc.)
@@ -25,25 +25,48 @@ export const sourceDocTypeEnum = z.enum([
 
 export type SourceDocType = z.infer<typeof sourceDocTypeEnum>;
 
-/** Asklepios document types for Layer 3 ingestion */
+/**
+ * FHIR R4-aligned Asklepios document types for Layer 3 ingestion.
+ *
+ * Maps to FHIR resources:
+ *   diagnostic-report → DiagnosticReport (LOINC 26436-6 / 18748-4)
+ *   procedure-note    → Procedure (LOINC 28570-0)
+ *   clinical-note     → DocumentReference (LOINC 11488-4)
+ *   patient-document  → DocumentReference (LOINC 51855-5)
+ *   research-paper    → external literature
+ *   other             → non-medical
+ */
 export const asklepiosTypeEnum = z.enum([
-  'lab-report',
-  'consultation-letter',
-  'imaging-report',
+  'diagnostic-report',
+  'procedure-note',
   'clinical-note',
+  'patient-document',
+  'research-paper',
   'other',
 ]);
 
 export type AsklepiosType = z.infer<typeof asklepiosTypeEnum>;
 
-/** Mapping from source document_type to Asklepios DocumentType */
+/**
+ * Mapping from source document_type to FHIR R4-aligned Asklepios DocumentType.
+ *
+ * | Source          | Asklepios         | FHIR Resource     | LOINC     |
+ * |-----------------|-------------------|--------------------|-----------|
+ * | lab_result      | diagnostic-report | DiagnosticReport   | 26436-6   |
+ * | imaging_report  | diagnostic-report | DiagnosticReport   | 18748-4   |
+ * | procedure       | procedure-note    | Procedure          | 28570-0   |
+ * | consultation    | clinical-note     | DocumentReference  | 11488-4   |
+ * | external        | clinical-note     | DocumentReference  | 11488-4   |
+ * | narrative       | patient-document  | DocumentReference  | 51855-5   |
+ * | other           | other             | —                  | —         |
+ */
 export const documentTypeMapping: Record<SourceDocType, DocumentType> = {
-  lab_result: 'lab-report',
-  consultation: 'consultation-letter',
-  imaging_report: 'imaging-report',
-  narrative: 'clinical-note',
-  abdominal: 'other',
-  external: 'other',
+  lab_result: 'diagnostic-report',
+  imaging_report: 'diagnostic-report',
+  procedure: 'procedure-note',
+  consultation: 'clinical-note',
+  external: 'clinical-note',
+  narrative: 'patient-document',
   other: 'other',
 };
 

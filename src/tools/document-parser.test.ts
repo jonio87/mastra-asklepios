@@ -19,7 +19,7 @@ describe('documentParserTool', () => {
   it('validates input with optional documentType', () => {
     const result = documentParserTool.inputSchema.safeParse({
       text: 'Lab results',
-      documentType: 'lab-report',
+      documentType: 'diagnostic-report',
     });
     expect(result.success).toBe(true);
   });
@@ -54,25 +54,25 @@ describe('documentParserTool.execute', () => {
     expect(result.medications.length).toBeGreaterThan(0);
   });
 
-  it('detects genetic report document type', async () => {
+  it('detects genetic report as diagnostic-report', async () => {
     const text = 'Whole exome sequencing results: variant c.1234A>G identified in FBN1 gene.';
     const result = await execute({ text }, {} as never);
 
-    expect(result.documentType).toBe('genetic-report');
+    expect(result.documentType).toBe('diagnostic-report');
   });
 
-  it('detects lab report document type', async () => {
+  it('detects lab report as diagnostic-report', async () => {
     const text = 'Laboratory Report: CBC and metabolic panel results.';
     const result = await execute({ text }, {} as never);
 
-    expect(result.documentType).toBe('lab-report');
+    expect(result.documentType).toBe('diagnostic-report');
   });
 
   it('uses provided documentType when specified', async () => {
     const text = 'Some document text';
-    const result = await execute({ text, documentType: 'referral' }, {} as never);
+    const result = await execute({ text, documentType: 'clinical-note' }, {} as never);
 
-    expect(result.documentType).toBe('referral');
+    expect(result.documentType).toBe('clinical-note');
   });
 
   it('extracts lab values from text', async () => {

@@ -30,7 +30,7 @@ export const provEntityTypeValues = [
   'progression', // Layer 2A: temporal chain link
   'consultation', // Layer 2A: consultation record
   'treatment-trial', // Layer 2A: treatment trial record
-  'abdominal-report', // Layer 2A: abdominal procedure report
+  'procedure-report', // Layer 2A: procedure report (FHIR Procedure)
   'research-finding', // Layer 3: literature/PGx/trial finding
   'research-query', // Layer 3: search query audit
   'hypothesis', // Layer 4: diagnostic hypothesis

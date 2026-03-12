@@ -17,26 +17,26 @@ Use this when the user provides or references a medical document (clinical note,
 imaging report, consultation letter, research paper). The document is chunked by type,
 embedded, and stored for retrieval via the knowledge-query tool.
 
-Document types and their chunking strategies:
+FHIR R4-aligned document types and chunking strategies:
+- diagnostic-report: recursive chunking (labs by panel, imaging by finding)
+- procedure-note: markdown chunking (preserves procedure sections)
 - clinical-note: markdown chunking (preserves headers/sections)
-- lab-report: recursive chunking (by panel)
-- imaging-report: recursive chunking (by finding)
+- patient-document: markdown chunking (patient-authored narratives)
 - research-paper: recursive chunking (by section, larger chunks)
-- consultation-letter: markdown chunking (by specialist section)
 - other: recursive chunking (general purpose)`,
   inputSchema: z.object({
     patientId: z.string().describe('Patient resource ID'),
     text: z.string().describe('Full text of the document'),
     documentType: z
       .enum([
+        'diagnostic-report',
+        'procedure-note',
         'clinical-note',
-        'lab-report',
-        'imaging-report',
+        'patient-document',
         'research-paper',
-        'consultation-letter',
         'other',
       ])
-      .describe('Type of medical document'),
+      .describe('FHIR R4-aligned document type'),
     date: z.string().optional().describe('Document date (ISO 8601)'),
     source: z.string().optional().describe('Source institution or provider'),
     title: z.string().optional().describe('Document title or description'),

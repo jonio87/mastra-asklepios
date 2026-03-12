@@ -26,15 +26,15 @@ Good queries: "Anti-Ro-60 testing methodology", "cervical MRI findings 2022",
     query: z.string().describe('Natural language search query'),
     documentType: z
       .enum([
+        'diagnostic-report',
+        'procedure-note',
         'clinical-note',
-        'lab-report',
-        'imaging-report',
+        'patient-document',
         'research-paper',
-        'consultation-letter',
         'other',
       ])
       .optional()
-      .describe('Filter by document type'),
+      .describe('Filter by FHIR R4-aligned document type'),
     topK: z.number().optional().describe('Number of results to return (default: 5)'),
   }),
   outputSchema: z.object({
@@ -68,11 +68,11 @@ Good queries: "Anti-Ro-60 testing methodology", "cervical MRI findings 2022",
     const queryParams: {
       patientId: string;
       documentType?:
+        | 'diagnostic-report'
+        | 'procedure-note'
         | 'clinical-note'
-        | 'lab-report'
-        | 'imaging-report'
+        | 'patient-document'
         | 'research-paper'
-        | 'consultation-letter'
         | 'other';
       topK?: number;
     } = {

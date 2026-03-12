@@ -570,14 +570,14 @@ export function registerClinicalTools(server: McpServer): void {
         text: z.string().describe('Full text of the document'),
         documentType: z
           .enum([
+            'diagnostic-report',
+            'procedure-note',
             'clinical-note',
-            'lab-report',
-            'imaging-report',
+            'patient-document',
             'research-paper',
-            'consultation-letter',
             'other',
           ])
-          .describe('Type of medical document'),
+          .describe('FHIR R4-aligned document type'),
         date: z.string().optional().describe('Document date (ISO 8601)'),
         source: z.string().optional().describe('Source institution or provider'),
         title: z.string().optional().describe('Document title or description'),
@@ -625,15 +625,15 @@ export function registerClinicalTools(server: McpServer): void {
         query: z.string().describe('Natural language search query'),
         documentType: z
           .enum([
+            'diagnostic-report',
+            'procedure-note',
             'clinical-note',
-            'lab-report',
-            'imaging-report',
+            'patient-document',
             'research-paper',
-            'consultation-letter',
             'other',
           ])
           .optional()
-          .describe('Filter by document type'),
+          .describe('Filter by FHIR R4-aligned document type'),
         topK: z.number().optional().describe('Number of results to return (default: 5)'),
       },
       annotations: { readOnlyHint: true, destructiveHint: false },

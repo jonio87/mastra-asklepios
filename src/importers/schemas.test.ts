@@ -15,7 +15,7 @@ describe('sourceDocTypeEnum', () => {
       'lab_result',
       'consultation',
       'imaging_report',
-      'abdominal',
+      'procedure',
       'narrative',
       'external',
       'other',
@@ -31,12 +31,13 @@ describe('sourceDocTypeEnum', () => {
 });
 
 describe('asklepiosTypeEnum', () => {
-  it('accepts all valid Asklepios types', () => {
+  it('accepts all valid Asklepios types (FHIR R4-aligned)', () => {
     for (const type of [
-      'lab-report',
-      'consultation-letter',
-      'imaging-report',
+      'diagnostic-report',
+      'procedure-note',
       'clinical-note',
+      'patient-document',
+      'research-paper',
       'other',
     ]) {
       expect(asklepiosTypeEnum.parse(type)).toBe(type);
@@ -48,26 +49,32 @@ describe('asklepiosTypeEnum', () => {
   });
 });
 
-describe('documentTypeMapping', () => {
-  it('maps lab_result to lab-report', () => {
-    expect(documentTypeMapping.lab_result).toBe('lab-report');
+describe('documentTypeMapping (FHIR R4-aligned)', () => {
+  it('maps lab_result to diagnostic-report (DiagnosticReport/LAB)', () => {
+    expect(documentTypeMapping.lab_result).toBe('diagnostic-report');
   });
 
-  it('maps consultation to consultation-letter', () => {
-    expect(documentTypeMapping.consultation).toBe('consultation-letter');
+  it('maps imaging_report to diagnostic-report (DiagnosticReport/RAD)', () => {
+    expect(documentTypeMapping.imaging_report).toBe('diagnostic-report');
   });
 
-  it('maps imaging_report to imaging-report', () => {
-    expect(documentTypeMapping.imaging_report).toBe('imaging-report');
+  it('maps procedure to procedure-note (FHIR Procedure)', () => {
+    expect(documentTypeMapping.procedure).toBe('procedure-note');
   });
 
-  it('maps narrative to clinical-note', () => {
-    expect(documentTypeMapping.narrative).toBe('clinical-note');
+  it('maps consultation to clinical-note (DocumentReference)', () => {
+    expect(documentTypeMapping.consultation).toBe('clinical-note');
   });
 
-  it('maps abdominal, external, other to other', () => {
-    expect(documentTypeMapping.abdominal).toBe('other');
-    expect(documentTypeMapping.external).toBe('other');
+  it('maps external to clinical-note (DocumentReference)', () => {
+    expect(documentTypeMapping.external).toBe('clinical-note');
+  });
+
+  it('maps narrative to patient-document (DocumentReference)', () => {
+    expect(documentTypeMapping.narrative).toBe('patient-document');
+  });
+
+  it('maps other to other', () => {
     expect(documentTypeMapping.other).toBe('other');
   });
 });
@@ -77,7 +84,7 @@ describe('recordFrontmatterSchema', () => {
     document_id: 'lab-20250901-001',
     document_type: 'lab_result',
     patient_id: 'tomasz-szychliński',
-    asklepios_type: 'lab-report',
+    asklepios_type: 'diagnostic-report',
     evidence_tier: 'T1-official',
     validation_status: 'confirmed',
     source_credibility: 98,

@@ -187,12 +187,12 @@ export function registerStateTools(server: McpServer): void {
         text: z.string().describe('Clinical document text to parse'),
         documentType: z
           .enum([
-            'medical-record',
-            'lab-report',
-            'genetic-report',
+            'diagnostic-report',
+            'procedure-note',
             'clinical-note',
-            'referral',
-            'unknown',
+            'patient-document',
+            'research-paper',
+            'other',
           ])
           .optional()
           .describe('Type of clinical document (default: auto-detected)'),

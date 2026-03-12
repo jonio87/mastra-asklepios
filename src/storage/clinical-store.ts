@@ -360,6 +360,9 @@ export class ClinicalStore {
                 physician TEXT,
                 language TEXT,
                 tags TEXT,
+                fhir_resource_type TEXT,
+                loinc_doc_code TEXT,
+                diagnostic_service_section TEXT,
                 evidence_tier TEXT,
                 validation_status TEXT,
                 source_credibility INTEGER,
@@ -2230,8 +2233,9 @@ export class ClinicalStore {
               extraction_date, extraction_tool, extraction_wave, extracted_markdown_path,
               pre_processing, post_processing, pipeline_version, category, subcategory,
               date, facility, physician, language, tags,
+              fhir_resource_type, loinc_doc_code, diagnostic_service_section,
               evidence_tier, validation_status, source_credibility
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         doc.id,
         doc.patientId,
@@ -2256,6 +2260,9 @@ export class ClinicalStore {
         doc.physician ?? null,
         doc.language ?? null,
         doc.tags ? JSON.stringify(doc.tags) : null,
+        doc.fhirResourceType ?? null,
+        doc.loincDocCode ?? null,
+        doc.diagnosticServiceSection ?? null,
         doc.evidenceTier ?? null,
         doc.validationStatus ?? null,
         doc.sourceCredibility ?? null,
@@ -2954,6 +2961,15 @@ function mapRowToSourceDocument(row: Record<string, unknown>): SourceDocument {
   if (row['language']) result.language = String(row['language']);
   const tags = parseJsonArray(row['tags']);
   if (tags) result.tags = tags;
+  if (row['fhir_resource_type'])
+    result.fhirResourceType = String(
+      row['fhir_resource_type'],
+    ) as SourceDocument['fhirResourceType'];
+  if (row['loinc_doc_code']) result.loincDocCode = String(row['loinc_doc_code']);
+  if (row['diagnostic_service_section'])
+    result.diagnosticServiceSection = String(
+      row['diagnostic_service_section'],
+    ) as SourceDocument['diagnosticServiceSection'];
   return result;
 }
 

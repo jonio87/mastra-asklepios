@@ -25,14 +25,14 @@ const ParsedSectionSchema = z.object({
 const ParsedDocumentSchema = z.object({
   documentType: z
     .enum([
-      'medical-record',
-      'lab-report',
-      'genetic-report',
+      'diagnostic-report',
+      'procedure-note',
       'clinical-note',
-      'referral',
-      'unknown',
+      'patient-document',
+      'research-paper',
+      'other',
     ])
-    .describe('Detected document type'),
+    .describe('Detected FHIR R4-aligned document type'),
   patientAge: z.string().optional().describe('Patient age if found'),
   patientSex: z.string().optional().describe('Patient sex if found'),
   sections: z.array(ParsedSectionSchema).describe('Parsed document sections'),
@@ -65,15 +65,15 @@ export const documentParserTool = createTool({
     text: z.string().describe('Raw text content of the medical document'),
     documentType: z
       .enum([
-        'medical-record',
-        'lab-report',
-        'genetic-report',
+        'diagnostic-report',
+        'procedure-note',
         'clinical-note',
-        'referral',
-        'unknown',
+        'patient-document',
+        'research-paper',
+        'other',
       ])
       .optional()
-      .describe('Known document type (auto-detected if not specified)'),
+      .describe('Known FHIR R4-aligned document type (auto-detected if not specified)'),
   }),
   outputSchema: ParsedDocumentSchema,
   execute: async (inputData) => {
@@ -112,41 +112,71 @@ export const documentParserTool = createTool({
 
 function detectDocumentType(
   text: string,
-): 'medical-record' | 'lab-report' | 'genetic-report' | 'clinical-note' | 'referral' | 'unknown' {
+):
+  | 'diagnostic-report'
+  | 'procedure-note'
+  | 'clinical-note'
+  | 'patient-document'
+  | 'research-paper'
+  | 'other' {
   const lower = text.toLowerCase();
-  if (
-    lower.includes('genetic') ||
-    lower.includes('variant') ||
-    lower.includes('exome') ||
-    lower.includes('genome')
-  )
-    return 'genetic-report';
+  // Diagnostic reports: labs, imaging, pathology, genetic testing
   if (
     lower.includes('lab result') ||
     lower.includes('laboratory') ||
     lower.includes('cbc') ||
-    lower.includes('metabolic panel')
+    lower.includes('metabolic panel') ||
+    lower.includes('imaging') ||
+    lower.includes('mri') ||
+    lower.includes('ct scan') ||
+    lower.includes('x-ray') ||
+    lower.includes('genetic') ||
+    lower.includes('variant') ||
+    lower.includes('exome') ||
+    lower.includes('genome') ||
+    lower.includes('pathology')
   )
-    return 'lab-report';
+    return 'diagnostic-report';
+  // Procedure notes: endoscopy, biopsy, surgical procedures
   if (
-    lower.includes('referral') ||
-    lower.includes('referred to') ||
-    lower.includes('referring physician')
+    lower.includes('gastroscopy') ||
+    lower.includes('colonoscopy') ||
+    lower.includes('endoscopy') ||
+    lower.includes('biopsy') ||
+    lower.includes('procedure note') ||
+    lower.includes('operative report')
   )
-    return 'referral';
+    return 'procedure-note';
+  // Research papers
+  if (
+    lower.includes('abstract') ||
+    lower.includes('doi:') ||
+    lower.includes('pubmed') ||
+    (lower.includes('methods') && lower.includes('results') && lower.includes('conclusion'))
+  )
+    return 'research-paper';
+  // Patient-authored documents
+  if (
+    lower.includes('patient narrative') ||
+    lower.includes('my symptoms') ||
+    lower.includes('self-report') ||
+    lower.includes('opis dolegliwości')
+  )
+    return 'patient-document';
+  // Clinical notes: consultations, progress notes, referrals, discharge summaries
   if (
     lower.includes('progress note') ||
     lower.includes('clinic visit') ||
-    lower.includes('assessment and plan')
-  )
-    return 'clinical-note';
-  if (
+    lower.includes('assessment and plan') ||
+    lower.includes('referral') ||
+    lower.includes('referred to') ||
     lower.includes('medical record') ||
     lower.includes('discharge summary') ||
-    lower.includes('history and physical')
+    lower.includes('history and physical') ||
+    lower.includes('consultation')
   )
-    return 'medical-record';
-  return 'unknown';
+    return 'clinical-note';
+  return 'other';
 }
 
 function extractSections(text: string): Array<{

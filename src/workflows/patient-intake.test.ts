@@ -24,7 +24,7 @@ describe('patientIntakeWorkflow', () => {
   it('validates input with optional documentType', () => {
     const result = patientIntakeWorkflow.inputSchema.safeParse({
       documentText: 'Lab report text',
-      documentType: 'lab-report',
+      documentType: 'diagnostic-report',
       patientId: 'patient-anon-002',
     });
     expect(result.success).toBe(true);
@@ -45,7 +45,7 @@ describe('patientIntakeWorkflow', () => {
   it('validates output schema structure', () => {
     const result = patientIntakeWorkflow.outputSchema.safeParse({
       patientId: 'patient-anon-001',
-      parsedDocument: { documentType: 'medical-record' },
+      parsedDocument: { documentType: 'diagnostic-report' },
       phenotypes: [
         {
           originalText: 'joint pain',

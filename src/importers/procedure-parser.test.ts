@@ -1,5 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
-import { buildAbdominalId, mapAbdominalReport } from './abdominal-parser.js';
+import { buildProcedureId, mapProcedureReport } from './procedure-parser.js';
 import type { RecordFrontmatter } from './schemas.js';
 
 function makeFrontmatter(
@@ -7,9 +7,9 @@ function makeFrontmatter(
 ): RecordFrontmatter {
   return {
     document_id: 'abd-20210501-abdominal-001',
-    document_type: 'abdominal',
-    patient_id: 'tomasz-szychliński',
-    asklepios_type: 'other',
+    document_type: 'procedure',
+    patient_id: 'patient-tomasz-szychlinski',
+    asklepios_type: 'procedure-note',
     evidence_tier: 'T1-official',
     validation_status: 'confirmed',
     source_credibility: 85,
@@ -20,21 +20,21 @@ function makeFrontmatter(
   } as RecordFrontmatter;
 }
 
-describe('buildAbdominalId', () => {
+describe('buildProcedureId', () => {
   it('generates deterministic import ID', () => {
-    expect(buildAbdominalId('abd-20210501-abdominal-001')).toBe(
-      'import-abd-abd-20210501-abdominal-001',
+    expect(buildProcedureId('abd-20210501-abdominal-001')).toBe(
+      'import-proc-abd-20210501-abdominal-001',
     );
   });
 });
 
-describe('mapAbdominalReport', () => {
-  it('maps frontmatter to abdominal report', () => {
+describe('mapProcedureReport', () => {
+  it('maps frontmatter to procedure report', () => {
     const body = 'Gastroscopy findings: normal esophagus.';
-    const result = mapAbdominalReport(makeFrontmatter(), body);
+    const result = mapProcedureReport(makeFrontmatter(), body);
 
-    expect(result.id).toBe('import-abd-abd-20210501-abdominal-001');
-    expect(result.patientId).toBe('tomasz-szychliński');
+    expect(result.id).toBe('import-proc-abd-20210501-abdominal-001');
+    expect(result.patientId).toBe('patient-tomasz-szychlinski');
     expect(result.procedureType).toBe('gastroscopy');
     expect(result.date).toBe('2021-05-01');
     expect(result.source).toBe('Badania jama brzuszna/2021.05 Gastoskopia ENG.pdf');
@@ -45,7 +45,7 @@ describe('mapAbdominalReport', () => {
     const fm = makeFrontmatter({
       source_file: 'Badania jama brzuszna/2021.05 Gastroskopia Kolonoskopia.pdf',
     });
-    const result = mapAbdominalReport(fm, 'body');
+    const result = mapProcedureReport(fm, 'body');
     expect(result.procedureType).toBe('gastroscopy');
   });
 
@@ -53,7 +53,7 @@ describe('mapAbdominalReport', () => {
     const fm = makeFrontmatter({
       source_file: 'Badania jama brzuszna/2021.05 Karta infor. pH-metria.pdf',
     });
-    const result = mapAbdominalReport(fm, 'body');
+    const result = mapProcedureReport(fm, 'body');
     expect(result.procedureType).toBe('pH-metry');
   });
 
@@ -62,7 +62,7 @@ describe('mapAbdominalReport', () => {
       source_file: '2025_07_05_TSZ SIBO.pdf',
       category: 'sibo',
     });
-    const result = mapAbdominalReport(fm, 'body');
+    const result = mapProcedureReport(fm, 'body');
     expect(result.procedureType).toBe('SIBO');
   });
 
@@ -70,7 +70,7 @@ describe('mapAbdominalReport', () => {
     const fm = makeFrontmatter({
       source_file: '2025_07_06 Helicobakter.pdf',
     });
-    const result = mapAbdominalReport(fm, 'body');
+    const result = mapProcedureReport(fm, 'body');
     expect(result.procedureType).toBe('helicobacter_test');
   });
 
@@ -78,7 +78,7 @@ describe('mapAbdominalReport', () => {
     const fm = makeFrontmatter({
       source_file: 'Badania jama brzuszna/2021.05 USG  jamy brzusznej.pdf',
     });
-    const result = mapAbdominalReport(fm, 'body');
+    const result = mapProcedureReport(fm, 'body');
     expect(result.procedureType).toBe('ultrasound');
   });
 
@@ -91,7 +91,7 @@ Refluks żołądkowo-przełykowy. Zaleca się IPP.
 Zalecenia:
 Dieta lekkostrawna.`;
 
-    const result = mapAbdominalReport(makeFrontmatter(), body);
+    const result = mapProcedureReport(makeFrontmatter(), body);
     expect(result.conclusions).toContain('Refluks');
   });
 
@@ -99,13 +99,13 @@ Dieta lekkostrawna.`;
     const fm = makeFrontmatter();
     const body =
       'Badanie wykonał dr n. med. Aleksandra Woźniak-Stolarska w Klinice Gastroenterologii.';
-    const result = mapAbdominalReport(fm, body);
+    const result = mapProcedureReport(fm, body);
     expect(result.physician).toContain('Woźniak-Stolarska');
   });
 
   it('stores full body as findings without truncation', () => {
     const body = 'X'.repeat(8000);
-    const result = mapAbdominalReport(makeFrontmatter(), body);
+    const result = mapProcedureReport(makeFrontmatter(), body);
     expect(result.findings?.length).toBe(8000);
   });
 });
