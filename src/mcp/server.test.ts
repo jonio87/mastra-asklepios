@@ -6,6 +6,7 @@ import { registerResources } from './resources.js';
 import { registerAgentTools } from './tools-agents.js';
 import { registerClinicalTools } from './tools-clinical.js';
 import { registerCoreTools } from './tools-core.js';
+import { registerDataLayerTools } from './tools-data-layer.js';
 import { registerSessionTools } from './tools-session.js';
 import { registerStateTools } from './tools-state.js';
 import { registerStreamingTools } from './tools-streaming.js';
@@ -75,6 +76,57 @@ jest.mock('../tools/evidence-link.js', () => ({
   evidenceLinkTool: { execute: jest.fn() },
 }));
 
+jest.mock('../tools/index.js', () => ({
+  extractFindingsTool: { execute: jest.fn() },
+  dataCompletenessTool: { execute: jest.fn() },
+  regenerationCheckTool: { execute: jest.fn() },
+}));
+
+jest.mock('../storage/clinical-store.js', () => ({
+  getClinicalStore: jest.fn(() => ({
+    querySourceDocuments: jest.fn(() => Promise.resolve([])),
+    queryLabs: jest.fn(() => Promise.resolve([])),
+    queryConsultations: jest.fn(() => Promise.resolve([])),
+    getImagingReports: jest.fn(() => Promise.resolve([])),
+    queryImagingFindings: jest.fn(() => Promise.resolve([])),
+    queryDiagnoses: jest.fn(() => Promise.resolve([])),
+    queryProgressions: jest.fn(() => Promise.resolve([])),
+    queryTreatments: jest.fn(() => Promise.resolve([])),
+    getAbdominalReports: jest.fn(() => Promise.resolve([])),
+    queryReportVersions: jest.fn(() => Promise.resolve([])),
+    getPendingIntegrations: jest.fn(() => Promise.resolve([])),
+  })),
+}));
+
+jest.mock('../storage/provenance-store.js', () => ({
+  getProvenanceStore: jest.fn(() => ({
+    getPendingSignals: jest.fn(() => Promise.resolve([])),
+    getEntityCountsByLayer: jest.fn(() => Promise.resolve({})),
+    getSignalSummary: jest.fn(() =>
+      Promise.resolve({ pending: 0, propagated: 0, acknowledged: 0, dismissed: 0 }),
+    ),
+    getDerivationChain: jest.fn(() => Promise.resolve([])),
+    acknowledgeSignal: jest.fn(() => Promise.resolve()),
+  })),
+}));
+
+jest.mock('../storage/cascade.js', () => ({
+  CascadeOrchestrator: jest.fn(() => ({
+    processPendingSignals: jest.fn(() =>
+      Promise.resolve({
+        patientId: 'test',
+        signalsProcessed: 0,
+        signalsSkipped: 0,
+        actions: [],
+        newSignalsEmitted: 0,
+        dryRun: true,
+        startedAt: '',
+        completedAt: '',
+      }),
+    ),
+  })),
+}));
+
 jest.mock('../clients/biomedical-mcp.js', () => ({
   getBiomedicalTools: jest.fn(() => Promise.resolve({})),
   biomedicalMcp: { listTools: jest.fn(() => Promise.resolve({})) },
@@ -122,11 +174,11 @@ describe('MCP Server', () => {
       const server = await createAsklepiosMcpServer();
       const { tools, resources, resourceTemplates, prompts } = getServerInternals(server);
 
-      // At least 42 native tools (3 core + 8 agent + 4 workflow + 5 state + 2 task +
-      // 6 clinical + 1 validation + 8 research + 3 session + 2 streaming)
+      // At least 47 native tools (3 core + 8 agent + 4 workflow + 5 state + 2 task +
+      // 6 clinical + 1 validation + 8 research + 3 session + 2 streaming + 5 data-layer)
       // Biomedical tools may also be present depending on Jest module isolation
-      expect(Object.keys(tools).length).toBeGreaterThanOrEqual(42);
-      expect(Object.keys(resources).length + Object.keys(resourceTemplates).length).toBe(7);
+      expect(Object.keys(tools).length).toBeGreaterThanOrEqual(47);
+      expect(Object.keys(resources).length + Object.keys(resourceTemplates).length).toBe(9);
       expect(Object.keys(prompts).length).toBe(4);
     });
   });
@@ -240,17 +292,19 @@ describe('MCP Server', () => {
       expect(staticNames).toContain('system://memory/stats');
     });
 
-    it('registers 3 resource templates', () => {
+    it('registers 5 resource templates', () => {
       const templateNames = Object.keys(resourceTemplates);
-      expect(templateNames.length).toBe(3);
+      expect(templateNames.length).toBe(5);
       expect(templateNames).toContain('patient-profile');
       expect(templateNames).toContain('patient-timeline');
       expect(templateNames).toContain('agent-config');
+      expect(templateNames).toContain('data-completeness');
+      expect(templateNames).toContain('provenance-summary');
     });
 
-    it('registers total of 7 resources', () => {
+    it('registers total of 9 resources', () => {
       const total = Object.keys(resources).length + Object.keys(resourceTemplates).length;
-      expect(total).toBe(7);
+      expect(total).toBe(9);
     });
   });
 
@@ -326,6 +380,27 @@ describe('MCP Server', () => {
     });
   });
 
+  describe('registerDataLayerTools', () => {
+    const server = createTestServer();
+    registerDataLayerTools(server);
+    const { tools } = getServerInternals(server);
+    const toolNames = Object.keys(tools);
+
+    it('registers exactly 5 data layer tools', () => {
+      expect(toolNames.length).toBe(5);
+    });
+
+    it.each([
+      'extract_imaging_findings',
+      'check_data_completeness',
+      'check_regeneration',
+      'process_cascade',
+      'query_provenance',
+    ])('registers %s', (name) => {
+      expect(toolNames).toContain(name);
+    });
+  });
+
   describe('tool annotations', () => {
     const server = createTestServer();
     registerCoreTools(server);
@@ -395,6 +470,10 @@ describe('MCP Server', () => {
 
     it('exports registerStreamingTools as function', () => {
       expect(typeof registerStreamingTools).toBe('function');
+    });
+
+    it('exports registerDataLayerTools as function', () => {
+      expect(typeof registerDataLayerTools).toBe('function');
     });
   });
 });

@@ -1,33 +1,27 @@
-import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
-import { ClinicalStore } from '../storage/clinical-store.js';
+import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
+import { ClinicalStore, setClinicalStoreForTest } from '../storage/clinical-store.js';
+import { queryDataTool as _queryDataTool } from './query-data.js';
+
+// biome-ignore lint/suspicious/noExplicitAny: test needs to call execute without full Mastra context
+const queryDataTool = _queryDataTool as any;
 
 const TEST_PATIENT = 'patient-query-test';
 
 /**
  * Tests for the consolidated queryData tool.
- * Verifies discriminated-union routing for all 5 query types.
+ * Verifies discriminated-union routing for all query types.
  *
  * Seeds data via ClinicalStore, then queries via the tool to verify routing.
  *
- * Strategy: import the real ClinicalStore class directly, create an
- * in-memory store, then use jest.unstable_mockModule to intercept
- * getClinicalStore() so the tool reads from our in-memory store.
- * The tool module is dynamically imported AFTER the mock is registered.
+ * Strategy: create an in-memory store and inject it into the singleton
+ * via setClinicalStoreForTest so getClinicalStore() inside the tool
+ * returns the same instance. Avoids flaky ESM mocking.
  */
 
 const store = new ClinicalStore('file::memory:?cache=shared');
 
-jest.unstable_mockModule('../storage/clinical-store.js', () => ({
-  ClinicalStore,
-  getClinicalStore: () => store,
-}));
-
-// biome-ignore lint/suspicious/noExplicitAny: dynamically imported in beforeAll
-let queryDataTool: any;
-
 beforeAll(async () => {
-  const mod = await import('./query-data.js');
-  queryDataTool = mod.queryDataTool;
+  setClinicalStoreForTest(store);
   await store.ensureInitialized();
   await seedTestData();
 });
@@ -80,6 +74,7 @@ async function seedTestData() {
     referenceRange: '0.0-5.0',
     flag: 'normal',
     date: '2025-01-10',
+    source: 'Lab B',
   });
 
   // Treatment trials
@@ -187,7 +182,7 @@ async function seedTestData() {
     certaintyLevel: 'WEAK',
     version: 1,
     date: '2024-01-01',
-    evidenceTier: 'T3-ai-inferred',
+    evidenceTier: 'T3',
   });
   await store.addHypothesis({
     id: 'hyp-qt-002',
@@ -198,7 +193,7 @@ async function seedTestData() {
     certaintyLevel: 'MODERATE',
     version: 2,
     date: '2024-06-15',
-    evidenceTier: 'T2-patient-reported',
+    evidenceTier: 'T2',
   });
   await store.addHypothesis({
     id: 'hyp-qt-003',
@@ -209,7 +204,7 @@ async function seedTestData() {
     certaintyLevel: 'STRONG',
     version: 3,
     date: '2025-01-10',
-    evidenceTier: 'T1-specialist',
+    evidenceTier: 'T1',
   });
 }
 

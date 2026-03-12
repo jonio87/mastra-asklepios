@@ -1,9 +1,10 @@
 /**
  * Import medical-records markdown files into Asklepios.
  *
- * Phase 0: Validate all files (fail-early — no DB writes until everything passes)
- * Phase 1: Layer 3 — Document Knowledge Base (semantic search via embeddings)
- * Phase 2: Layer 2 — Structured Lab Results (queryable clinical data)
+ * Phase 0:   Validate all files (fail-early — no DB writes until everything passes)
+ * Phase 0.5: Layer 0 — Source Documents (extraction metadata, provenance tracking)
+ * Phase 1:   Layer 3 — Document Knowledge Base (semantic search via embeddings)
+ * Phase 2:   Layer 2 — Structured Records (labs, consultations, imaging, abdominal, narratives)
  *
  * Usage:
  *   npx tsx scripts/import-records.ts <records-dir> [options]
@@ -20,6 +21,7 @@ import type { LabResult } from '../src/schemas/clinical-record.js';
 import type { DocumentType } from '../src/knowledge/document-store.js';
 import type { ParsedRecord } from '../src/importers/parser.js';
 import type { RecordFrontmatter, StructuredLabValue } from '../src/importers/schemas.js';
+import type { SourceDocument } from '../src/schemas/source-document.js';
 import { discoverRecordFiles, parseRecordFile, stripFrontmatter } from '../src/importers/parser.js';
 import { normalizeLabValue } from '../src/importers/normalizer.js';
 import { mapConsultation } from '../src/importers/consultation-parser.js';
@@ -27,6 +29,7 @@ import { mapImagingReport } from '../src/importers/imaging-parser.js';
 import { mapAbdominalReport } from '../src/importers/abdominal-parser.js';
 import { documentTypeMapping } from '../src/importers/schemas.js';
 import { getClinicalStore } from '../src/storage/clinical-store.js';
+import { getProvenanceStore } from '../src/storage/provenance-store.js';
 import { getDocumentStore } from '../src/knowledge/document-store.js';
 import { vectorStore } from '../src/memory.js';
 import { createEmbedder } from '../src/utils/embedder.js';
@@ -108,6 +111,179 @@ async function validateAll(
   }
 
   return { valid, errors, totalLabValues };
+}
+
+// ─── Phase 0.5: Layer 0 — Source Documents ───────────────────────────────
+
+interface Layer0Result {
+  imported: number;
+  skipped: number;
+}
+
+/**
+ * Map a parsed record's frontmatter into a SourceDocument for Layer 0 storage.
+ * Frontmatter uses .passthrough() so provenance fields (source_file_hash,
+ * source_file_size_bytes, etc.) from add_provenance.py are available.
+ */
+function mapToSourceDocument(record: ParsedRecord): SourceDocument {
+  const fm = record.frontmatter as RecordFrontmatter & Record<string, unknown>;
+  const doc: SourceDocument = {
+    id: `src-${fm.document_id}`,
+    patientId: fm.patient_id,
+    originalFilename: typeof fm['source_file'] === 'string' ? fm['source_file'] : fm.document_id,
+    originalFileHash: typeof fm['source_file_hash'] === 'string' ? fm['source_file_hash'] : 'unknown',
+    originalFileSizeBytes: typeof fm['source_file_size_bytes'] === 'number' ? fm['source_file_size_bytes'] : 0,
+    extractionMethod: mapExtractionMethod(fm.extraction_model),
+    extractionConfidence: fm.extraction_confidence ?? 0.9,
+    extractionDate: typeof fm['extraction_date'] === 'string' ? fm['extraction_date'] : new Date().toISOString(),
+    extractionTool: typeof fm['extraction_tool'] === 'string' ? fm['extraction_tool'] : (fm.extraction_model ?? 'unknown'),
+    extractedMarkdownPath: record.filePath,
+    category: fm.document_type,
+    evidenceTier: fm.evidence_tier,
+    validationStatus: fm.validation_status,
+    sourceCredibility: fm.source_credibility,
+  };
+
+  // Optional fields — set via mutation for exactOptionalPropertyTypes
+  if (typeof fm['original_page_count'] === 'number') doc.originalPageCount = fm['original_page_count'];
+  if (typeof fm['extraction_wave'] === 'number') doc.extractionWave = fm['extraction_wave'];
+  if (typeof fm['pre_processing'] === 'string') doc.preProcessing = fm['pre_processing'];
+  if (typeof fm['post_processing'] === 'string') doc.postProcessing = fm['post_processing'];
+  if (typeof fm['extraction_pipeline_version'] === 'string') doc.pipelineVersion = fm['extraction_pipeline_version'];
+  if (typeof fm['category'] === 'string') doc.subcategory = fm['category'];
+  if (fm.date) doc.date = fm.date;
+  if (fm.facility) doc.facility = fm.facility;
+  if (typeof fm['physician'] === 'string') doc.physician = fm['physician'];
+  if (fm.language) doc.language = fm.language;
+  if (fm.tags) doc.tags = fm.tags;
+
+  return doc;
+}
+
+/** Map extraction_model from frontmatter to our ExtractionMethod enum */
+function mapExtractionMethod(model: string | undefined): SourceDocument['extractionMethod'] {
+  if (!model) return 'other';
+  const lower = model.toLowerCase();
+  if (lower.includes('claude')) return 'claude_read';
+  if (lower.includes('tesseract')) return 'tesseract_ocr';
+  if (lower.includes('pymupdf')) return 'pymupdf';
+  if (lower.includes('docx') || lower.includes('python-docx')) return 'python_docx';
+  return 'other';
+}
+
+async function importLayer0(
+  records: ParsedRecord[],
+  verbose: boolean,
+): Promise<Layer0Result> {
+  const store = getClinicalStore();
+  const result: Layer0Result = { imported: 0, skipped: 0 };
+
+  for (const record of records) {
+    try {
+      const doc = mapToSourceDocument(record);
+      await store.addSourceDocument(doc);
+      result.imported++;
+
+      if (verbose) {
+        console.log(`  L0  ${record.frontmatter.document_id} → source_documents (${doc.category})`);
+      }
+    } catch (err) {
+      // Silently skip duplicates (same id already exists)
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('UNIQUE') || message.includes('duplicate')) {
+        result.skipped++;
+        if (verbose) {
+          console.log(`  SKIP ${record.frontmatter.document_id} (already in source_documents)`);
+        }
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Record provenance for a completed import phase.
+ * Creates a PROV activity linking source documents to their derived entities.
+ */
+async function recordImportProvenance(
+  records: ParsedRecord[],
+  phase: string,
+  description: string,
+): Promise<void> {
+  const provStore = getProvenanceStore();
+  const now = new Date().toISOString();
+
+  // Record the import activity
+  const activityId = `import-${phase}-${now}`;
+  await provStore.recordActivity({
+    id: activityId,
+    type: 'import',
+    startedAt: now,
+    endedAt: now,
+    metadata: JSON.stringify({ phase, description, recordCount: records.length }),
+    createdAt: now,
+  });
+
+  // Record the pipeline agent (idempotent via INSERT OR REPLACE)
+  await provStore.recordAgent({
+    id: 'pipeline:import-records',
+    type: 'pipeline',
+    name: 'import-records.ts',
+    createdAt: now,
+  });
+
+  // Link activity to agent
+  await provStore.recordRelation({
+    id: `rel-${activityId}-agent`,
+    type: 'wasAttributedTo',
+    subjectId: activityId,
+    objectId: 'pipeline:import-records',
+    createdAt: now,
+  });
+
+  // Record source document entities and emit change signals for new data
+  for (const record of records) {
+    const entityId = `src-${record.frontmatter.document_id}`;
+
+    // Record the source document as a provenance entity (Layer 0)
+    await provStore.recordEntity({
+      id: entityId,
+      type: 'source-doc',
+      layer: 0,
+      patientId: record.frontmatter.patient_id,
+      metadata: JSON.stringify({
+        documentType: record.frontmatter.document_type,
+        date: record.frontmatter.date,
+      }),
+      createdAt: now,
+    });
+
+    // Link entity to the import activity
+    await provStore.recordRelation({
+      id: `rel-${entityId}-${activityId}`,
+      type: 'wasGeneratedBy',
+      subjectId: entityId,
+      objectId: activityId,
+      createdAt: now,
+    });
+
+    // Emit change signal: new source document affects all higher layers (1-5)
+    await provStore.emitChangeSignal({
+      id: `signal-${phase}-${record.frontmatter.document_id}-${Date.now()}`,
+      sourceEntityId: entityId,
+      affectedLayers: [1, 2, 3, 4, 5],
+      affectedEntityIds: [entityId],
+      changeType: 'new',
+      summary: `New ${record.frontmatter.document_type} imported: ${record.frontmatter.document_id}`,
+      priority: 'medium',
+      status: 'pending',
+      patientId: record.frontmatter.patient_id,
+      createdAt: now,
+    });
+  }
 }
 
 // ─── Phase 1: Layer 3 — Document Knowledge Base ──────────────────────────
@@ -576,6 +752,18 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  // ── Phase 0.5: Layer 0 — Source Documents ─────────────────────────────
+  console.log('\nPhase 0.5: Layer 0 — Source Documents...');
+  const layer0Result = await importLayer0(validation.valid, opts.verbose);
+  console.log(`  Source documents: ${layer0Result.imported} imported, ${layer0Result.skipped} skipped`);
+
+  // Record provenance for the import
+  await recordImportProvenance(
+    validation.valid,
+    'layer0',
+    `Imported ${layer0Result.imported} source documents from ${opts.recordsDir}`,
+  );
+
   // ── Phase 1: Layer 3 ───────────────────────────────────────────────────
   let layer3Result: Layer3Result | undefined;
   if (!opts.layer2Only) {
@@ -623,6 +811,8 @@ async function main(): Promise<void> {
   console.log('\n═══════════════════════════════════════════════════');
   console.log('  Import Complete');
   console.log('═══════════════════════════════════════════════════');
+
+  console.log(`  Layer 0 (Source Docs):    ${layer0Result.imported} imported, ${layer0Result.skipped} skipped`);
 
   if (layer3Result) {
     console.log(`  Layer 3 (Documents):     ${layer3Result.ingested} ingested, ${layer3Result.skipped} skipped, ${layer3Result.errors} errors`);

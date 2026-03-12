@@ -1,12 +1,17 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import type { EvidenceTier, ValidationStatus } from '../schemas/clinical-record.js';
+import { bodyRegionEnum, diagnosisStatusEnum } from '../schemas/diagnosis.js';
 import { chromosomeEnum } from '../schemas/genetic-variant.js';
+import { findingTypeEnum } from '../schemas/imaging-finding.js';
+import { findingDomainEnum } from '../schemas/progression.js';
+import { reportLanguageEnum } from '../schemas/report-version.js';
 import {
   certaintyLevelEnum,
   evidenceLevelEnum,
   externalIdTypeEnum,
 } from '../schemas/research-record.js';
+import { extractionMethodEnum, sourceDocCategoryEnum } from '../schemas/source-document.js';
 import type { ClinicalStore } from '../storage/clinical-store.js';
 import { getClinicalStore } from '../storage/clinical-store.js';
 import { logger } from '../utils/logger.js';
@@ -374,6 +379,56 @@ const geneticVariantsQuery = z.object({
   offset: z.number().int().nonnegative().optional().describe('Pagination offset (default: 0)'),
 });
 
+// ─── Layer 0/2/5 query schemas ────────────────────────────────────────
+
+const sourceDocumentsQuery = z.object({
+  type: z.literal('source-documents'),
+  patientId: z.string().describe('Patient resource ID'),
+  category: sourceDocCategoryEnum.optional().describe('Filter by document category'),
+  dateFrom: z.string().optional().describe('Start date (ISO 8601)'),
+  dateTo: z.string().optional().describe('End date (ISO 8601)'),
+  facility: z.string().optional().describe('Filter by facility'),
+  extractionMethod: extractionMethodEnum.optional().describe('Filter by extraction method'),
+  limit: z.number().int().positive().optional().describe('Max results'),
+});
+
+const imagingFindingsQuery = z.object({
+  type: z.literal('imaging-findings'),
+  patientId: z.string().describe('Patient resource ID'),
+  anatomicalLocation: z.string().optional().describe('Filter by anatomical location (LIKE)'),
+  findingType: findingTypeEnum.optional().describe('Filter by finding type'),
+  imagingReportId: z.string().optional().describe('Filter by parent imaging report ID'),
+  limit: z.number().int().positive().optional().describe('Max results'),
+});
+
+const diagnosesQuery = z.object({
+  type: z.literal('diagnoses'),
+  patientId: z.string().describe('Patient resource ID'),
+  icd10Code: z.string().optional().describe('Filter by ICD-10 code'),
+  currentStatus: diagnosisStatusEnum.optional().describe('Filter by diagnosis status'),
+  bodyRegion: bodyRegionEnum.optional().describe('Filter by body region'),
+  limit: z.number().int().positive().optional().describe('Max results'),
+});
+
+const progressionsQuery = z.object({
+  type: z.literal('progressions'),
+  patientId: z.string().describe('Patient resource ID'),
+  findingChainId: z.string().optional().describe('Filter by finding chain ID'),
+  findingName: z.string().optional().describe('Filter by finding name'),
+  findingDomain: findingDomainEnum.optional().describe('Filter by domain (imaging, lab, etc.)'),
+  anatomicalLocation: z.string().optional().describe('Filter by anatomical location'),
+  dateFrom: z.string().optional().describe('Start date (ISO 8601)'),
+  dateTo: z.string().optional().describe('End date (ISO 8601)'),
+  limit: z.number().int().positive().optional().describe('Max results'),
+});
+
+const reportVersionsQuery = z.object({
+  type: z.literal('report-versions'),
+  patientId: z.string().describe('Patient resource ID'),
+  reportName: z.string().optional().describe('Filter by report name'),
+  language: reportLanguageEnum.optional().describe('Filter by language'),
+});
+
 /**
  * Keep the discriminated union for runtime parsing — it gives precise per-type validation.
  * But Anthropic's API rejects `oneOf` at the top level of tool `input_schema`,
@@ -391,6 +446,11 @@ const queryDataUnion = z.discriminatedUnion('type', [
   hypothesisTimelineQuery,
   researchSummaryQuery,
   geneticVariantsQuery,
+  sourceDocumentsQuery,
+  imagingFindingsQuery,
+  diagnosesQuery,
+  progressionsQuery,
+  reportVersionsQuery,
 ]);
 
 const queryDataInputSchema = z.object({
@@ -407,6 +467,11 @@ const queryDataInputSchema = z.object({
       'hypothesis-timeline',
       'research-summary',
       'genetic-variants',
+      'source-documents',
+      'imaging-findings',
+      'diagnoses',
+      'progressions',
+      'report-versions',
     ])
     .describe('Type of clinical/research data to query'),
   patientId: z.string().describe('Patient resource ID'),
@@ -499,13 +564,44 @@ const queryDataInputSchema = z.object({
     .describe('(genetic-variants) Filter by position range end'),
   genotype: z.string().optional().describe('(genetic-variants) Filter by specific genotype'),
   excludeNoCalls: z.boolean().optional().describe('(genetic-variants) Exclude no-call variants'),
-  limit: z.number().int().positive().optional().describe('(genetic-variants) Max results'),
+  limit: z.number().int().positive().optional().describe('Max results (multiple types)'),
   offset: z
     .number()
     .int()
     .nonnegative()
     .optional()
     .describe('(genetic-variants) Pagination offset'),
+  // source-documents-specific fields
+  category: sourceDocCategoryEnum
+    .optional()
+    .describe('(source-documents) Filter by document category'),
+  facility: z.string().optional().describe('(source-documents) Filter by facility'),
+  extractionMethod: extractionMethodEnum
+    .optional()
+    .describe('(source-documents) Filter by extraction method'),
+  // imaging-findings-specific fields
+  anatomicalLocation: z
+    .string()
+    .optional()
+    .describe('(imaging-findings/progressions) Filter by anatomical location'),
+  findingType: findingTypeEnum.optional().describe('(imaging-findings) Filter by finding type'),
+  imagingReportId: z
+    .string()
+    .optional()
+    .describe('(imaging-findings) Filter by parent imaging report'),
+  // diagnoses-specific fields
+  icd10Code: z.string().optional().describe('(diagnoses) Filter by ICD-10 code'),
+  currentStatus: diagnosisStatusEnum.optional().describe('(diagnoses) Filter by status'),
+  bodyRegion: bodyRegionEnum.optional().describe('(diagnoses) Filter by body region'),
+  // progressions-specific fields
+  findingChainId: z.string().optional().describe('(progressions) Filter by finding chain ID'),
+  findingName: z.string().optional().describe('(progressions) Filter by finding name'),
+  findingDomain: findingDomainEnum
+    .optional()
+    .describe('(progressions) Filter by domain (imaging, lab, clinical, functional)'),
+  // report-versions-specific fields
+  reportName: z.string().optional().describe('(report-versions) Filter by report name'),
+  language: reportLanguageEnum.optional().describe('(report-versions) Filter by language'),
 });
 
 // ─── Handler functions (one per query type) ──────────────────────────
@@ -774,6 +870,96 @@ async function handleGeneticVariantsQuery(
   };
 }
 
+// ─── Layer 0/2/5 query handlers ──────────────────────────────────────
+
+async function handleSourceDocumentsQuery(
+  store: ClinicalStore,
+  input: z.infer<typeof sourceDocumentsQuery>,
+): Promise<{ data: unknown }> {
+  logger.debug(
+    `queryData(source-documents) for ${input.patientId}, cat=${input.category ?? 'all'}`,
+  );
+  const docs = await store.querySourceDocuments({
+    patientId: input.patientId,
+    category: input.category,
+    dateFrom: input.dateFrom,
+    dateTo: input.dateTo,
+    facility: input.facility,
+    extractionMethod: input.extractionMethod,
+    limit: input.limit,
+  });
+  const categoryCounts = await store.getSourceDocumentsByCategory(input.patientId);
+  const total = await store.countSourceDocuments(input.patientId);
+  return { data: { documents: docs, count: docs.length, total, categoryCounts } };
+}
+
+async function handleImagingFindingsQuery(
+  store: ClinicalStore,
+  input: z.infer<typeof imagingFindingsQuery>,
+): Promise<{ data: unknown }> {
+  logger.debug(
+    `queryData(imaging-findings) for ${input.patientId}, loc=${input.anatomicalLocation ?? 'all'}`,
+  );
+  const findings = await store.queryImagingFindings({
+    patientId: input.patientId,
+    anatomicalLocation: input.anatomicalLocation,
+    findingType: input.findingType,
+    imagingReportId: input.imagingReportId,
+    limit: input.limit,
+  });
+  return { data: { findings, count: findings.length } };
+}
+
+async function handleDiagnosesQuery(
+  store: ClinicalStore,
+  input: z.infer<typeof diagnosesQuery>,
+): Promise<{ data: unknown }> {
+  logger.debug(`queryData(diagnoses) for ${input.patientId}`);
+  const diagnoses = await store.queryDiagnoses({
+    patientId: input.patientId,
+    icd10Code: input.icd10Code,
+    currentStatus: input.currentStatus,
+    bodyRegion: input.bodyRegion,
+    limit: input.limit,
+  });
+  return { data: { diagnoses, count: diagnoses.length } };
+}
+
+async function handleProgressionsQuery(
+  store: ClinicalStore,
+  input: z.infer<typeof progressionsQuery>,
+): Promise<{ data: unknown }> {
+  logger.debug(`queryData(progressions) for ${input.patientId}`);
+  const progressions = await store.queryProgressions({
+    patientId: input.patientId,
+    findingChainId: input.findingChainId,
+    findingName: input.findingName,
+    findingDomain: input.findingDomain,
+    anatomicalLocation: input.anatomicalLocation,
+    dateFrom: input.dateFrom,
+    dateTo: input.dateTo,
+    limit: input.limit,
+  });
+  return { data: { progressions, count: progressions.length } };
+}
+
+async function handleReportVersionsQuery(
+  store: ClinicalStore,
+  input: z.infer<typeof reportVersionsQuery>,
+): Promise<{ data: unknown }> {
+  logger.debug(`queryData(report-versions) for ${input.patientId}`);
+  const versions = await store.queryReportVersions(input.patientId);
+  // Filter by reportName and language if provided
+  let filtered = versions;
+  if (input.reportName) {
+    filtered = filtered.filter((v) => v.reportName === input.reportName);
+  }
+  if (input.language) {
+    filtered = filtered.filter((v) => v.language === input.language);
+  }
+  return { data: { versions: filtered, count: filtered.length } };
+}
+
 // ─── Tool definition ─────────────────────────────────────────────────
 
 export const queryDataTool = createTool({
@@ -789,7 +975,12 @@ export const queryDataTool = createTool({
 - "hypotheses": Diagnostic hypotheses with optional evidence links (filter by name, certaintyLevel)
 - "hypothesis-timeline": Full version chain for a hypothesis — confidence evolution, direction changes, triggering evidence
 - "research-summary": Aggregate research statistics (finding count, query count, hypothesis count, top sources)
-- "genetic-variants": Raw genotype data (23andMe SNPs) — filter by chromosome, rsid, position range, genotype`,
+- "genetic-variants": Raw genotype data (23andMe SNPs) — filter by chromosome, rsid, position range, genotype
+- "source-documents": Layer 0 source documents with category counts and extraction metadata
+- "imaging-findings": Structured imaging findings (decomposed from text blobs) — filter by location, type, report
+- "diagnoses": Diagnosis registry with ICD-10, status, body region — the explicit diagnosis table
+- "progressions": Temporal chains tracking same finding across dates — filter by chain, domain, location
+- "report-versions": Report version history with content hash and change tracking`,
   inputSchema: queryDataInputSchema,
   outputSchema: z.object({
     data: z.unknown().describe('Query results — shape depends on type'),
@@ -822,6 +1013,16 @@ export const queryDataTool = createTool({
         return handleResearchSummaryQuery(store, parsed);
       case 'genetic-variants':
         return handleGeneticVariantsQuery(store, parsed);
+      case 'source-documents':
+        return handleSourceDocumentsQuery(store, parsed);
+      case 'imaging-findings':
+        return handleImagingFindingsQuery(store, parsed);
+      case 'diagnoses':
+        return handleDiagnosesQuery(store, parsed);
+      case 'progressions':
+        return handleProgressionsQuery(store, parsed);
+      case 'report-versions':
+        return handleReportVersionsQuery(store, parsed);
     }
   },
 });

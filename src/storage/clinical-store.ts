@@ -17,7 +17,11 @@ import type {
   PatientReport,
   TreatmentTrial,
 } from '../schemas/clinical-record.js';
+import type { Diagnosis, DiagnosisQuery } from '../schemas/diagnosis.js';
 import type { GeneticVariant, GeneticVariantQuery } from '../schemas/genetic-variant.js';
+import type { ImagingFinding, ImagingFindingQuery } from '../schemas/imaging-finding.js';
+import type { Progression, ProgressionQuery } from '../schemas/progression.js';
+import type { ReportDataIntegration, ReportVersion } from '../schemas/report-version.js';
 import type {
   HypothesisEvidenceLink,
   ResearchFinding,
@@ -25,6 +29,7 @@ import type {
   ResearchQuery,
   ResearchSummary,
 } from '../schemas/research-record.js';
+import type { SourceDocument, SourceDocumentQuery } from '../schemas/source-document.js';
 import { logger } from '../utils/logger.js';
 
 /**
@@ -51,6 +56,9 @@ export class ClinicalStore {
 
   async ensureInitialized(): Promise<void> {
     if (this.initialized) return;
+    // Enable FK constraints — SQLite disables them by default per-connection.
+    // Use executeMultiple to avoid libsql treating PRAGMA as parameterized statement.
+    await this.client.executeMultiple('PRAGMA foreign_keys = ON;');
     await this.migrate();
     this.initialized = true;
   }
@@ -326,6 +334,158 @@ export class ClinicalStore {
             )`,
       `CREATE INDEX IF NOT EXISTS idx_brain_patterns_category ON brain_patterns(category)`,
       `CREATE INDEX IF NOT EXISTS idx_brain_patterns_confidence ON brain_patterns(confidence)`,
+
+      // ─── Layer 0: Source Documents ──────────────────────────────────────
+      `CREATE TABLE IF NOT EXISTS source_documents (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                original_filename TEXT NOT NULL,
+                original_file_hash TEXT NOT NULL,
+                original_file_size_bytes INTEGER NOT NULL,
+                original_page_count INTEGER,
+                mime_type TEXT,
+                extraction_method TEXT NOT NULL,
+                extraction_confidence REAL NOT NULL,
+                extraction_date TEXT NOT NULL,
+                extraction_tool TEXT NOT NULL,
+                extraction_wave INTEGER,
+                extracted_markdown_path TEXT NOT NULL,
+                pre_processing TEXT,
+                post_processing TEXT,
+                pipeline_version TEXT,
+                category TEXT NOT NULL,
+                subcategory TEXT,
+                date TEXT,
+                facility TEXT,
+                physician TEXT,
+                language TEXT,
+                tags TEXT,
+                evidence_tier TEXT,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
+      `CREATE INDEX IF NOT EXISTS idx_source_docs_patient ON source_documents(patient_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_source_docs_category ON source_documents(patient_id, category)`,
+      `CREATE INDEX IF NOT EXISTS idx_source_docs_hash ON source_documents(original_file_hash)`,
+      `CREATE INDEX IF NOT EXISTS idx_source_docs_date ON source_documents(patient_id, date)`,
+
+      // ─── Layer 2A: Structured Imaging Findings ─────────────────────────
+      `CREATE TABLE IF NOT EXISTS clinical_imaging_findings (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                imaging_report_id TEXT NOT NULL
+                    REFERENCES clinical_imaging_reports(id)
+                    ON DELETE CASCADE ON UPDATE CASCADE,
+                anatomical_location TEXT NOT NULL,
+                finding_type TEXT NOT NULL,
+                laterality TEXT,
+                measurement REAL,
+                measurement_unit TEXT,
+                severity TEXT,
+                description TEXT NOT NULL,
+                nerve_involvement TEXT,
+                comparison_to_prior TEXT,
+                date TEXT NOT NULL,
+                radiologist TEXT,
+                evidence_tier TEXT,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
+      `CREATE INDEX IF NOT EXISTS idx_findings_patient ON clinical_imaging_findings(patient_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_findings_report ON clinical_imaging_findings(imaging_report_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_findings_location ON clinical_imaging_findings(patient_id, anatomical_location)`,
+      `CREATE INDEX IF NOT EXISTS idx_findings_type ON clinical_imaging_findings(patient_id, finding_type)`,
+      `CREATE INDEX IF NOT EXISTS idx_findings_date ON clinical_imaging_findings(patient_id, date)`,
+
+      // ─── Layer 2A: Diagnosis Registry ──────────────────────────────────
+      `CREATE TABLE IF NOT EXISTS clinical_diagnoses (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                icd10_code TEXT,
+                condition_name TEXT NOT NULL,
+                condition_name_pl TEXT,
+                onset_date TEXT,
+                first_documented_date TEXT,
+                current_status TEXT NOT NULL,
+                body_region TEXT,
+                confidence REAL,
+                supporting_evidence_ids TEXT,
+                notes TEXT,
+                evidence_tier TEXT,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
+      `CREATE INDEX IF NOT EXISTS idx_diagnoses_patient ON clinical_diagnoses(patient_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_diagnoses_icd ON clinical_diagnoses(patient_id, icd10_code)`,
+      `CREATE INDEX IF NOT EXISTS idx_diagnoses_status ON clinical_diagnoses(patient_id, current_status)`,
+
+      // ─── Layer 2A: Progression Tracking ────────────────────────────────
+      `CREATE TABLE IF NOT EXISTS clinical_progressions (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                finding_chain_id TEXT NOT NULL,
+                finding_name TEXT NOT NULL,
+                finding_domain TEXT NOT NULL,
+                anatomical_location TEXT,
+                date TEXT NOT NULL,
+                value TEXT NOT NULL,
+                numeric_value REAL,
+                unit TEXT,
+                description TEXT,
+                direction TEXT NOT NULL,
+                comparison_note TEXT,
+                source_record_id TEXT,
+                source_record_type TEXT,
+                evidence_tier TEXT,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
+      `CREATE INDEX IF NOT EXISTS idx_progressions_patient ON clinical_progressions(patient_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_progressions_chain ON clinical_progressions(finding_chain_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_progressions_domain ON clinical_progressions(patient_id, finding_domain)`,
+      `CREATE INDEX IF NOT EXISTS idx_progressions_date ON clinical_progressions(patient_id, date)`,
+
+      // ─── Layer 5: Report Versions ──────────────────────────────────────
+      `CREATE TABLE IF NOT EXISTS report_versions (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                report_name TEXT NOT NULL,
+                language TEXT NOT NULL,
+                version TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                line_count INTEGER,
+                subsection_count INTEGER,
+                changes_summary TEXT,
+                change_source TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
+      `CREATE INDEX IF NOT EXISTS idx_report_versions_patient ON report_versions(patient_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_report_versions_name ON report_versions(patient_id, report_name, language)`,
+
+      // ─── Layer 5: Report Data Integration ──────────────────────────────
+      `CREATE TABLE IF NOT EXISTS report_data_integration (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                report_version_id TEXT NOT NULL
+                    REFERENCES report_versions(id)
+                    ON DELETE CASCADE ON UPDATE CASCADE,
+                data_id TEXT NOT NULL,
+                data_type TEXT NOT NULL,
+                integration_status TEXT NOT NULL,
+                section_affected TEXT,
+                integrated_at TEXT,
+                exclusion_reason TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
+      `CREATE INDEX IF NOT EXISTS idx_integration_patient ON report_data_integration(patient_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_integration_report ON report_data_integration(report_version_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_integration_status ON report_data_integration(patient_id, integration_status)`,
     ];
 
     for (const sql of statements) {
@@ -493,10 +653,17 @@ export class ClinicalStore {
    * Warns if a patient_id returns 0 results but similar IDs exist.
    * Call this from query methods to detect silent ID mismatches.
    */
-  private async warnIfIdMismatch(patientId: string, table: string, resultCount: number): Promise<void> {
+  private async warnIfIdMismatch(
+    patientId: string,
+    table: string,
+    resultCount: number,
+  ): Promise<void> {
     if (resultCount > 0) return;
     // Extract the base name (remove 'patient-' prefix, normalize unicode)
-    const baseName = patientId.replace(/^patient-/, '').normalize('NFC').toLowerCase();
+    const baseName = patientId
+      .replace(/^patient-/, '')
+      .normalize('NFC')
+      .toLowerCase();
     const result = await this.client.execute({
       sql: `SELECT DISTINCT patient_id FROM ${table} WHERE patient_id LIKE ?`,
       args: [`%${baseName.slice(0, 6)}%`],
@@ -2052,6 +2219,488 @@ export class ClinicalStore {
     return mapRowToGeneticVariant(row as Record<string, unknown>);
   }
 
+  // ─── Layer 0: Source Documents ────────────────────────────────────────
+
+  async addSourceDocument(doc: SourceDocument): Promise<void> {
+    await this.ensureInitialized();
+    await this.client.execute({
+      sql: `INSERT OR REPLACE INTO source_documents (
+              id, patient_id, original_filename, original_file_hash, original_file_size_bytes,
+              original_page_count, mime_type, extraction_method, extraction_confidence,
+              extraction_date, extraction_tool, extraction_wave, extracted_markdown_path,
+              pre_processing, post_processing, pipeline_version, category, subcategory,
+              date, facility, physician, language, tags,
+              evidence_tier, validation_status, source_credibility
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        doc.id,
+        doc.patientId,
+        doc.originalFilename,
+        doc.originalFileHash,
+        doc.originalFileSizeBytes,
+        doc.originalPageCount ?? null,
+        doc.mimeType ?? null,
+        doc.extractionMethod,
+        doc.extractionConfidence,
+        doc.extractionDate,
+        doc.extractionTool,
+        doc.extractionWave ?? null,
+        doc.extractedMarkdownPath,
+        doc.preProcessing ?? null,
+        doc.postProcessing ?? null,
+        doc.pipelineVersion ?? null,
+        doc.category,
+        doc.subcategory ?? null,
+        doc.date ?? null,
+        doc.facility ?? null,
+        doc.physician ?? null,
+        doc.language ?? null,
+        doc.tags ? JSON.stringify(doc.tags) : null,
+        doc.evidenceTier ?? null,
+        doc.validationStatus ?? null,
+        doc.sourceCredibility ?? null,
+      ],
+    });
+  }
+
+  async getSourceDocument(id: string): Promise<SourceDocument | undefined> {
+    await this.ensureInitialized();
+    const result = await this.client.execute({
+      sql: 'SELECT * FROM source_documents WHERE id = ?',
+      args: [id],
+    });
+    const row = result.rows[0];
+    if (!row) return undefined;
+    return mapRowToSourceDocument(row as Record<string, unknown>);
+  }
+
+  async querySourceDocuments(params: SourceDocumentQuery): Promise<SourceDocument[]> {
+    await this.ensureInitialized();
+    const conditions = ['patient_id = ?'];
+    const args: InValue[] = [params.patientId];
+
+    if (params.category) {
+      conditions.push('category = ?');
+      args.push(params.category);
+    }
+    if (params.dateFrom) {
+      conditions.push('date >= ?');
+      args.push(params.dateFrom);
+    }
+    if (params.dateTo) {
+      conditions.push('date <= ?');
+      args.push(params.dateTo);
+    }
+    if (params.facility) {
+      conditions.push('facility LIKE ?');
+      args.push(`%${params.facility}%`);
+    }
+    if (params.extractionMethod) {
+      conditions.push('extraction_method = ?');
+      args.push(params.extractionMethod);
+    }
+
+    const limit = params.limit ?? 500;
+    const result = await this.client.execute({
+      sql: `SELECT * FROM source_documents WHERE ${conditions.join(' AND ')} ORDER BY date ASC LIMIT ?`,
+      args: [...args, limit],
+    });
+    return result.rows.map((row) => mapRowToSourceDocument(row as Record<string, unknown>));
+  }
+
+  async countSourceDocuments(patientId: string): Promise<number> {
+    await this.ensureInitialized();
+    const result = await this.client.execute({
+      sql: 'SELECT COUNT(*) as cnt FROM source_documents WHERE patient_id = ?',
+      args: [patientId],
+    });
+    const row = result.rows[0];
+    return row ? Number(row['cnt']) : 0;
+  }
+
+  async getSourceDocumentsByCategory(patientId: string): Promise<Record<string, number>> {
+    await this.ensureInitialized();
+    const result = await this.client.execute({
+      sql: 'SELECT category, COUNT(*) as cnt FROM source_documents WHERE patient_id = ? GROUP BY category',
+      args: [patientId],
+    });
+    const counts: Record<string, number> = {};
+    for (const row of result.rows) {
+      counts[String(row['category'])] = Number(row['cnt']);
+    }
+    return counts;
+  }
+
+  // ─── Layer 2A: Imaging Findings ─────────────────────────────────────────
+
+  async addImagingFinding(finding: ImagingFinding): Promise<void> {
+    await this.ensureInitialized();
+    await this.client.execute({
+      sql: `INSERT OR REPLACE INTO clinical_imaging_findings (
+              id, patient_id, imaging_report_id, anatomical_location, finding_type,
+              laterality, measurement, measurement_unit, severity, description,
+              nerve_involvement, comparison_to_prior, date, radiologist,
+              evidence_tier, validation_status, source_credibility
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        finding.id,
+        finding.patientId,
+        finding.imagingReportId,
+        finding.anatomicalLocation,
+        finding.findingType,
+        finding.laterality ?? null,
+        finding.measurement ?? null,
+        finding.measurementUnit ?? null,
+        finding.severity ?? null,
+        finding.description,
+        finding.nerveInvolvement ?? null,
+        finding.comparisonToPrior ?? null,
+        finding.date,
+        finding.radiologist ?? null,
+        finding.evidenceTier ?? null,
+        finding.validationStatus ?? null,
+        finding.sourceCredibility ?? null,
+      ],
+    });
+  }
+
+  async addImagingFindingsBatch(findings: ImagingFinding[]): Promise<{ inserted: number }> {
+    await this.ensureInitialized();
+    if (findings.length === 0) return { inserted: 0 };
+
+    const stmts = findings.map((f) => ({
+      sql: `INSERT OR REPLACE INTO clinical_imaging_findings (
+              id, patient_id, imaging_report_id, anatomical_location, finding_type,
+              laterality, measurement, measurement_unit, severity, description,
+              nerve_involvement, comparison_to_prior, date, radiologist,
+              evidence_tier, validation_status, source_credibility
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        f.id,
+        f.patientId,
+        f.imagingReportId,
+        f.anatomicalLocation,
+        f.findingType,
+        f.laterality ?? null,
+        f.measurement ?? null,
+        f.measurementUnit ?? null,
+        f.severity ?? null,
+        f.description,
+        f.nerveInvolvement ?? null,
+        f.comparisonToPrior ?? null,
+        f.date,
+        f.radiologist ?? null,
+        f.evidenceTier ?? null,
+        f.validationStatus ?? null,
+        f.sourceCredibility ?? null,
+      ] as InValue[],
+    }));
+
+    for (let i = 0; i < stmts.length; i += 100) {
+      await this.client.batch(stmts.slice(i, i + 100), 'write');
+    }
+    return { inserted: findings.length };
+  }
+
+  async queryImagingFindings(params: ImagingFindingQuery): Promise<ImagingFinding[]> {
+    await this.ensureInitialized();
+    const conditions = ['patient_id = ?'];
+    const args: InValue[] = [params.patientId];
+
+    if (params.imagingReportId) {
+      conditions.push('imaging_report_id = ?');
+      args.push(params.imagingReportId);
+    }
+    if (params.anatomicalLocation) {
+      if (params.anatomicalLocation.includes('%')) {
+        conditions.push('anatomical_location LIKE ?');
+      } else {
+        conditions.push('anatomical_location = ?');
+      }
+      args.push(params.anatomicalLocation);
+    }
+    if (params.findingType) {
+      conditions.push('finding_type = ?');
+      args.push(params.findingType);
+    }
+    if (params.dateFrom) {
+      conditions.push('date >= ?');
+      args.push(params.dateFrom);
+    }
+    if (params.dateTo) {
+      conditions.push('date <= ?');
+      args.push(params.dateTo);
+    }
+
+    const limit = params.limit ?? 200;
+    const result = await this.client.execute({
+      sql: `SELECT * FROM clinical_imaging_findings WHERE ${conditions.join(' AND ')} ORDER BY date ASC LIMIT ?`,
+      args: [...args, limit],
+    });
+    return result.rows.map((row) => mapRowToImagingFinding(row as Record<string, unknown>));
+  }
+
+  // ─── Layer 2A: Diagnoses ────────────────────────────────────────────────
+
+  async addDiagnosis(dx: Diagnosis): Promise<void> {
+    await this.ensureInitialized();
+    await this.client.execute({
+      sql: `INSERT OR REPLACE INTO clinical_diagnoses (
+              id, patient_id, icd10_code, condition_name, condition_name_pl,
+              onset_date, first_documented_date, current_status, body_region, confidence,
+              supporting_evidence_ids, notes,
+              evidence_tier, validation_status, source_credibility,
+              created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        dx.id,
+        dx.patientId,
+        dx.icd10Code ?? null,
+        dx.conditionName,
+        dx.conditionNamePl ?? null,
+        dx.onsetDate ?? null,
+        dx.firstDocumentedDate ?? null,
+        dx.currentStatus,
+        dx.bodyRegion ?? null,
+        dx.confidence ?? null,
+        dx.supportingEvidenceIds ? JSON.stringify(dx.supportingEvidenceIds) : null,
+        dx.notes ?? null,
+        dx.evidenceTier ?? null,
+        dx.validationStatus ?? null,
+        dx.sourceCredibility ?? null,
+        dx.createdAt ?? new Date().toISOString(),
+        dx.updatedAt ?? new Date().toISOString(),
+      ],
+    });
+  }
+
+  async queryDiagnoses(params: DiagnosisQuery): Promise<Diagnosis[]> {
+    await this.ensureInitialized();
+    const conditions = ['patient_id = ?'];
+    const args: InValue[] = [params.patientId];
+
+    if (params.icd10Code) {
+      conditions.push('icd10_code = ?');
+      args.push(params.icd10Code);
+    }
+    if (params.currentStatus) {
+      conditions.push('current_status = ?');
+      args.push(params.currentStatus);
+    }
+    if (params.bodyRegion) {
+      conditions.push('body_region = ?');
+      args.push(params.bodyRegion);
+    }
+
+    const limit = params.limit ?? 100;
+    const result = await this.client.execute({
+      sql: `SELECT * FROM clinical_diagnoses WHERE ${conditions.join(' AND ')} ORDER BY first_documented_date ASC LIMIT ?`,
+      args: [...args, limit],
+    });
+    return result.rows.map((row) => mapRowToDiagnosis(row as Record<string, unknown>));
+  }
+
+  // ─── Layer 2A: Progressions ─────────────────────────────────────────────
+
+  async addProgression(prog: Progression): Promise<void> {
+    await this.ensureInitialized();
+    await this.client.execute({
+      sql: `INSERT OR REPLACE INTO clinical_progressions (
+              id, patient_id, finding_chain_id, finding_name, finding_domain,
+              anatomical_location, date, value, numeric_value, unit, description,
+              direction, comparison_note, source_record_id, source_record_type,
+              evidence_tier, validation_status, source_credibility
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        prog.id,
+        prog.patientId,
+        prog.findingChainId,
+        prog.findingName,
+        prog.findingDomain,
+        prog.anatomicalLocation ?? null,
+        prog.date,
+        prog.value,
+        prog.numericValue ?? null,
+        prog.unit ?? null,
+        prog.description ?? null,
+        prog.direction,
+        prog.comparisonNote ?? null,
+        prog.sourceRecordId ?? null,
+        prog.sourceRecordType ?? null,
+        prog.evidenceTier ?? null,
+        prog.validationStatus ?? null,
+        prog.sourceCredibility ?? null,
+      ],
+    });
+  }
+
+  async queryProgressions(params: ProgressionQuery): Promise<Progression[]> {
+    await this.ensureInitialized();
+    const conditions = ['patient_id = ?'];
+    const args: InValue[] = [params.patientId];
+
+    if (params.findingChainId) {
+      conditions.push('finding_chain_id = ?');
+      args.push(params.findingChainId);
+    }
+    if (params.findingName) {
+      conditions.push('finding_name = ?');
+      args.push(params.findingName);
+    }
+    if (params.findingDomain) {
+      conditions.push('finding_domain = ?');
+      args.push(params.findingDomain);
+    }
+    if (params.anatomicalLocation) {
+      if (params.anatomicalLocation.includes('%')) {
+        conditions.push('anatomical_location LIKE ?');
+      } else {
+        conditions.push('anatomical_location = ?');
+      }
+      args.push(params.anatomicalLocation);
+    }
+    if (params.dateFrom) {
+      conditions.push('date >= ?');
+      args.push(params.dateFrom);
+    }
+    if (params.dateTo) {
+      conditions.push('date <= ?');
+      args.push(params.dateTo);
+    }
+
+    const limit = params.limit ?? 200;
+    const result = await this.client.execute({
+      sql: `SELECT * FROM clinical_progressions WHERE ${conditions.join(' AND ')} ORDER BY date ASC LIMIT ?`,
+      args: [...args, limit],
+    });
+    return result.rows.map((row) => mapRowToProgression(row as Record<string, unknown>));
+  }
+
+  async getProgressionChain(patientId: string, findingChainId: string): Promise<Progression[]> {
+    await this.ensureInitialized();
+    const result = await this.client.execute({
+      sql: 'SELECT * FROM clinical_progressions WHERE patient_id = ? AND finding_chain_id = ? ORDER BY date ASC',
+      args: [patientId, findingChainId],
+    });
+    return result.rows.map((row) => mapRowToProgression(row as Record<string, unknown>));
+  }
+
+  // ─── Layer 5: Report Versions ───────────────────────────────────────────
+
+  async addReportVersion(report: ReportVersion): Promise<void> {
+    await this.ensureInitialized();
+    await this.client.execute({
+      sql: `INSERT OR REPLACE INTO report_versions (
+              id, patient_id, report_name, language, version, file_path,
+              content_hash, line_count, subsection_count,
+              changes_summary, change_source, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        report.id,
+        report.patientId,
+        report.reportName,
+        report.language,
+        report.version,
+        report.filePath,
+        report.contentHash,
+        report.lineCount ?? null,
+        report.subsectionCount ?? null,
+        report.changesSummary ?? null,
+        report.changeSource ?? null,
+        report.createdAt,
+      ],
+    });
+  }
+
+  async getLatestReportVersion(params: {
+    patientId: string;
+    reportName: string;
+    language: string;
+  }): Promise<ReportVersion | undefined> {
+    await this.ensureInitialized();
+    const result = await this.client.execute({
+      sql: `SELECT * FROM report_versions
+            WHERE patient_id = ? AND report_name = ? AND language = ?
+            ORDER BY created_at DESC LIMIT 1`,
+      args: [params.patientId, params.reportName, params.language],
+    });
+    const row = result.rows[0];
+    if (!row) return undefined;
+    return mapRowToReportVersion(row as Record<string, unknown>);
+  }
+
+  async queryReportVersions(patientId: string): Promise<ReportVersion[]> {
+    await this.ensureInitialized();
+    const result = await this.client.execute({
+      sql: 'SELECT * FROM report_versions WHERE patient_id = ? ORDER BY created_at DESC',
+      args: [patientId],
+    });
+    return result.rows.map((row) => mapRowToReportVersion(row as Record<string, unknown>));
+  }
+
+  // ─── Layer 5: Report Data Integration ───────────────────────────────────
+
+  async addReportDataIntegration(integration: ReportDataIntegration): Promise<void> {
+    await this.ensureInitialized();
+    await this.client.execute({
+      sql: `INSERT OR REPLACE INTO report_data_integration (
+              id, patient_id, report_version_id, data_id, data_type,
+              integration_status, section_affected, integrated_at,
+              exclusion_reason, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        integration.id,
+        integration.patientId,
+        integration.reportVersionId,
+        integration.dataId,
+        integration.dataType,
+        integration.integrationStatus,
+        integration.sectionAffected ?? null,
+        integration.integratedAt ?? null,
+        integration.exclusionReason ?? null,
+        integration.createdAt,
+      ],
+    });
+  }
+
+  async getPendingIntegrations(params: {
+    patientId: string;
+    reportVersionId?: string;
+  }): Promise<ReportDataIntegration[]> {
+    await this.ensureInitialized();
+    const conditions = ['patient_id = ?', "integration_status = 'pending'"];
+    const args: InValue[] = [params.patientId];
+
+    if (params.reportVersionId) {
+      conditions.push('report_version_id = ?');
+      args.push(params.reportVersionId);
+    }
+
+    const result = await this.client.execute({
+      sql: `SELECT * FROM report_data_integration WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC`,
+      args,
+    });
+    return result.rows.map((row) => mapRowToReportDataIntegration(row as Record<string, unknown>));
+  }
+
+  async getIntegrationStatus(params: {
+    patientId: string;
+    reportVersionId: string;
+  }): Promise<Record<string, number>> {
+    await this.ensureInitialized();
+    const result = await this.client.execute({
+      sql: `SELECT integration_status, COUNT(*) as cnt FROM report_data_integration
+            WHERE patient_id = ? AND report_version_id = ?
+            GROUP BY integration_status`,
+      args: [params.patientId, params.reportVersionId],
+    });
+    const counts: Record<string, number> = {};
+    for (const row of result.rows) {
+      counts[String(row['integration_status'])] = Number(row['cnt']);
+    }
+    return counts;
+  }
+
   // ─── Cleanup ──────────────────────────────────────────────────────────
 
   async close(): Promise<void> {
@@ -2263,6 +2912,159 @@ function mapRowToEvidenceLink(row: Record<string, unknown>): HypothesisEvidenceL
   };
 }
 
+// ─── Layer 0 + Layer 2 Enhancement Row Mapping Helpers ────────────────────
+
+function parseJsonArray(val: unknown): string[] | undefined {
+  if (!val) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(String(val));
+    return Array.isArray(parsed) ? (parsed as string[]) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function mapRowToSourceDocument(row: Record<string, unknown>): SourceDocument {
+  const result: SourceDocument = {
+    id: String(row['id']),
+    patientId: String(row['patient_id']),
+    originalFilename: String(row['original_filename']),
+    originalFileHash: String(row['original_file_hash']),
+    originalFileSizeBytes: Number(row['original_file_size_bytes']),
+    extractionMethod: String(row['extraction_method']) as SourceDocument['extractionMethod'],
+    extractionConfidence: Number(row['extraction_confidence']),
+    extractionDate: String(row['extraction_date']),
+    extractionTool: String(row['extraction_tool']),
+    extractedMarkdownPath: String(row['extracted_markdown_path']),
+    category: String(row['category']) as SourceDocument['category'],
+    ...mapProvenance(row),
+  };
+  if (row['original_page_count'] !== null && row['original_page_count'] !== undefined)
+    result.originalPageCount = Number(row['original_page_count']);
+  if (row['mime_type']) result.mimeType = String(row['mime_type']);
+  if (row['extraction_wave'] !== null && row['extraction_wave'] !== undefined)
+    result.extractionWave = Number(row['extraction_wave']);
+  if (row['pre_processing']) result.preProcessing = String(row['pre_processing']);
+  if (row['post_processing']) result.postProcessing = String(row['post_processing']);
+  if (row['pipeline_version']) result.pipelineVersion = String(row['pipeline_version']);
+  if (row['subcategory']) result.subcategory = String(row['subcategory']);
+  if (row['date']) result.date = String(row['date']);
+  if (row['facility']) result.facility = String(row['facility']);
+  if (row['physician']) result.physician = String(row['physician']);
+  if (row['language']) result.language = String(row['language']);
+  const tags = parseJsonArray(row['tags']);
+  if (tags) result.tags = tags;
+  return result;
+}
+
+function mapRowToImagingFinding(row: Record<string, unknown>): ImagingFinding {
+  const result: ImagingFinding = {
+    id: String(row['id']),
+    patientId: String(row['patient_id']),
+    imagingReportId: String(row['imaging_report_id']),
+    anatomicalLocation: String(row['anatomical_location']),
+    findingType: String(row['finding_type']) as ImagingFinding['findingType'],
+    description: String(row['description']),
+    date: String(row['date']),
+    ...mapProvenance(row),
+  };
+  if (row['laterality'])
+    result.laterality = String(row['laterality']) as ImagingFinding['laterality'];
+  if (row['measurement'] !== null && row['measurement'] !== undefined)
+    result.measurement = Number(row['measurement']);
+  if (row['measurement_unit']) result.measurementUnit = String(row['measurement_unit']);
+  if (row['severity']) result.severity = String(row['severity']) as ImagingFinding['severity'];
+  if (row['nerve_involvement']) result.nerveInvolvement = String(row['nerve_involvement']);
+  if (row['comparison_to_prior']) result.comparisonToPrior = String(row['comparison_to_prior']);
+  if (row['radiologist']) result.radiologist = String(row['radiologist']);
+  return result;
+}
+
+function mapRowToDiagnosis(row: Record<string, unknown>): Diagnosis {
+  const result: Diagnosis = {
+    id: String(row['id']),
+    patientId: String(row['patient_id']),
+    conditionName: String(row['condition']),
+    currentStatus: String(row['current_status']) as Diagnosis['currentStatus'],
+    ...mapProvenance(row),
+  };
+  if (row['icd10_code']) result.icd10Code = String(row['icd10_code']);
+  if (row['condition_name_pl']) result.conditionNamePl = String(row['condition_name_pl']);
+  if (row['onset_date']) result.onsetDate = String(row['onset_date']);
+  if (row['first_documented_date'])
+    result.firstDocumentedDate = String(row['first_documented_date']);
+  if (row['body_region']) result.bodyRegion = String(row['body_region']) as Diagnosis['bodyRegion'];
+  if (row['confidence'] !== null && row['confidence'] !== undefined)
+    result.confidence = Number(row['confidence']);
+  const evidence = parseJsonArray(row['supporting_evidence_ids']);
+  if (evidence) result.supportingEvidenceIds = evidence;
+  if (row['notes']) result.notes = String(row['notes']);
+  if (row['created_at']) result.createdAt = String(row['created_at']);
+  if (row['updated_at']) result.updatedAt = String(row['updated_at']);
+  return result;
+}
+
+function mapRowToProgression(row: Record<string, unknown>): Progression {
+  const result: Progression = {
+    id: String(row['id']),
+    patientId: String(row['patient_id']),
+    findingChainId: String(row['finding_chain_id']),
+    findingName: String(row['finding_name']),
+    findingDomain: String(row['finding_domain']) as Progression['findingDomain'],
+    date: String(row['date']),
+    value: String(row['value']),
+    direction: String(row['direction']) as Progression['direction'],
+    ...mapProvenance(row),
+  };
+  if (row['anatomical_location']) result.anatomicalLocation = String(row['anatomical_location']);
+  if (row['numeric_value'] !== null && row['numeric_value'] !== undefined)
+    result.numericValue = Number(row['numeric_value']);
+  if (row['unit']) result.unit = String(row['unit']);
+  if (row['description']) result.description = String(row['description']);
+  if (row['comparison_note']) result.comparisonNote = String(row['comparison_note']);
+  if (row['source_record_id']) result.sourceRecordId = String(row['source_record_id']);
+  if (row['source_record_type']) result.sourceRecordType = String(row['source_record_type']);
+  return result;
+}
+
+function mapRowToReportVersion(row: Record<string, unknown>): ReportVersion {
+  const result: ReportVersion = {
+    id: String(row['id']),
+    patientId: String(row['patient_id']),
+    reportName: String(row['report_name']),
+    language: String(row['language']) as ReportVersion['language'],
+    version: String(row['version']),
+    filePath: String(row['file_path']),
+    contentHash: String(row['content_hash']),
+    createdAt: String(row['created_at']),
+  };
+  if (row['line_count'] !== null && row['line_count'] !== undefined)
+    result.lineCount = Number(row['line_count']);
+  if (row['subsection_count'] !== null && row['subsection_count'] !== undefined)
+    result.subsectionCount = Number(row['subsection_count']);
+  if (row['changes_summary']) result.changesSummary = String(row['changes_summary']);
+  if (row['change_source']) result.changeSource = String(row['change_source']);
+  return result;
+}
+
+function mapRowToReportDataIntegration(row: Record<string, unknown>): ReportDataIntegration {
+  const result: ReportDataIntegration = {
+    id: String(row['id']),
+    patientId: String(row['patient_id']),
+    reportVersionId: String(row['report_version_id']),
+    dataId: String(row['data_id']),
+    dataType: String(row['data_type']) as ReportDataIntegration['dataType'],
+    integrationStatus: String(
+      row['integration_status'],
+    ) as ReportDataIntegration['integrationStatus'],
+    createdAt: String(row['created_at']),
+  };
+  if (row['section_affected']) result.sectionAffected = String(row['section_affected']);
+  if (row['integrated_at']) result.integratedAt = String(row['integrated_at']);
+  if (row['exclusion_reason']) result.exclusionReason = String(row['exclusion_reason']);
+  return result;
+}
+
 // ─── Value Parsing ────────────────────────────────────────────────────────
 
 /**
@@ -2384,4 +3186,9 @@ export function getClinicalStore(): ClinicalStore {
     Instance = new ClinicalStore();
   }
   return Instance;
+}
+
+/** Replace the singleton for testing — ONLY for test use. */
+export function setClinicalStoreForTest(store: ClinicalStore): void {
+  Instance = store;
 }
