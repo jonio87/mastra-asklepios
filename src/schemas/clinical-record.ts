@@ -14,6 +14,27 @@ import { z } from 'zod';
  * - Evidence provenance fields (evidenceTier, validationStatus, sourceCredibility) on all records
  */
 
+// ─── FHIR-aligned Document Category ─────────────────────────────────────
+//
+// Maps internal table types to FHIR R5/R6 resource model:
+//   DiagnosticReport → lab results, imaging, endoscopy, functional tests
+//   Encounter        → consultations, hospital stays
+//   MedicationStatement → treatment trials
+//   ClinicalImpression → contradictions, agent learnings
+//   Observation      → patient-reported outcomes
+//   DocumentReference → narratives, external documents
+
+export const documentCategoryEnum = z.enum([
+  'diagnostic-report', // Labs, imaging, endoscopy, functional tests
+  'encounter', // Consultations, hospital stays
+  'medication-statement', // Treatment trials
+  'clinical-impression', // Contradictions, agent learnings
+  'patient-observation', // Patient-reported outcomes
+  'document-reference', // Narratives, external documents
+]);
+
+export type DocumentCategory = z.infer<typeof documentCategoryEnum>;
+
 // ─── Evidence Provenance (shared across all record types) ───────────────
 
 export const evidenceTierEnum = z.enum([
@@ -79,6 +100,7 @@ export const treatmentTrialSchema = z.object({
   sideEffects: z.array(z.string()).optional(),
   reasonDiscontinued: z.string().optional(),
   adequateTrial: z.boolean().optional(), // Was dose/duration adequate?
+  source: z.string().optional(), // Document source for provenance tracking
   ...evidenceProvenanceFields,
   patientId: z.string(),
 });
@@ -98,6 +120,7 @@ export const consultationSchema = z.object({
   conclusions: z.string().optional(),
   conclusionsStatus: z.enum(['documented', 'unknown', 'pending']),
   recommendations: z.array(z.string()).optional(),
+  source: z.string().optional(), // Document source for provenance tracking
   ...evidenceProvenanceFields,
   patientId: z.string(),
 });
@@ -116,7 +139,8 @@ export const contradictionSchema = z.object({
   finding2Method: z.string().optional(), // "Euroimmun ENA immunoblot"
   resolutionStatus: z.enum(['unresolved', 'pending', 'resolved']),
   resolutionPlan: z.string().optional(), // "Third platform ELISA recommended"
-  diagnosticImpact: z.string().optional(), // "Affects Sjögren hypothesis confidence"
+  diagnosticImpact: z.string().optional(), // \"Affects Sjögren hypothesis confidence\"
+  source: z.string().optional(), // Document source for provenance tracking
   ...evidenceProvenanceFields,
   patientId: z.string(),
 });
@@ -139,6 +163,7 @@ export const patientReportSchema = z.object({
   content: z.string(),
   severity: z.number().min(1).max(10).optional(),
   extractedInsights: z.array(z.string()).optional(),
+  source: z.string().optional(), // Document source for provenance tracking
   ...evidenceProvenanceFields,
   patientId: z.string(),
 });
@@ -162,11 +187,49 @@ export const agentLearningSchema = z.object({
   content: z.string(),
   confidence: z.number().min(0).max(100).optional(),
   relatedHypotheses: z.array(z.string()).optional(),
+  source: z.string().optional(), // Document source for provenance tracking
   ...evidenceProvenanceFields,
   patientId: z.string(),
 });
 
 export type AgentLearning = z.infer<typeof agentLearningSchema>;
+
+// ─── Imaging Reports ────────────────────────────────────────────────────
+
+export const imagingReportSchema = z.object({
+  id: z.string(),
+  modality: z.string(), // "MRI", "CT", "X-ray", "scintigraphy", "ultrasound"
+  bodyRegion: z.string(), // "cervical_spine", "head", "thoracic_spine"
+  date: z.string(),
+  facility: z.string().optional(), // "NZOZ Skanmex Diagnostyka"
+  physician: z.string().optional(), // "Lek. Paweł Szewczyk"
+  technique: z.string().optional(), // Imaging technique / protocol
+  findings: z.string().optional(), // Full findings text (no truncation)
+  impression: z.string().optional(), // Radiologist impression / summary
+  comparison: z.string().optional(), // Comparison with prior studies
+  source: z.string().optional(), // Source PDF filename
+  ...evidenceProvenanceFields,
+  patientId: z.string(),
+});
+
+export type ImagingReport = z.infer<typeof imagingReportSchema>;
+
+// ─── Abdominal Reports ──────────────────────────────────────────────────
+
+export const abdominalReportSchema = z.object({
+  id: z.string(),
+  procedureType: z.string(), // "gastroscopy", "colonoscopy", "pH-metry", "SIBO", "ultrasound", "consultation", "other"
+  date: z.string(),
+  facility: z.string().optional(),
+  physician: z.string().optional(),
+  findings: z.string().optional(), // Full findings text
+  conclusions: z.string().optional(), // Assessment / interpretation
+  source: z.string().optional(), // Source PDF filename
+  ...evidenceProvenanceFields,
+  patientId: z.string(),
+});
+
+export type AbdominalReport = z.infer<typeof abdominalReportSchema>;
 
 // ─── Lab Trend (computed, not stored) ───────────────────────────────────
 

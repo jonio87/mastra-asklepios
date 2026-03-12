@@ -6,7 +6,9 @@ import { brainFeedTool } from '../tools/brain-feed.js';
 import { brainRecallTool } from '../tools/brain-recall.js';
 import { captureDataTool } from '../tools/capture-data.js';
 import { knowledgeQueryTool } from '../tools/knowledge-query.js';
+import { patientContextTool } from '../tools/patient-context.js';
 import { queryDataTool } from '../tools/query-data.js';
+import { researchPlanTool } from '../tools/research-plan.js';
 import { modelRouter } from '../utils/model-router.js';
 import { brainAgent } from './brain-agent.js';
 import { followupAgent } from './followup-agent.js';
@@ -194,6 +196,14 @@ Additional tools loaded on demand — use **search_tools** to find them, then **
 - 80+ biomedical MCP tools: biomcp_* (PubMed, ClinVar, gnomAD, PharmGKB, DGIdb), gget_* (Ensembl, BLAST), biothings_* (genes, variants, drugs), pharmacology_* (targets, ligands), opengenes_*, synergyage_*, biocontext_* (STRING, Reactome, KEGG, DisGeNET), opentargets_* (gene-disease scoring)
 - Native: deepResearch, hpoMapper, documentParser, ingestDocument, knowledgeQuery
 
+**⚠️ MANDATORY: Verify before asserting absence.**
+Before claiming any test was "never done", any treatment was "never tried", or any finding is "absent":
+1. Query \`query-data type='labs' testName='%<test>%'\` to check Layer 2 clinical records
+2. Query \`knowledge-query\` with the test/finding name to check Layer 3 document knowledge base
+3. Only assert absence if BOTH layers return empty results
+4. Always qualify absence claims: "Not found in available records" rather than "NEVER done"
+Failure to verify caused a critical error: homocysteine was claimed "never measured" despite 6 measurements existing in Layer 2.
+
 ## Capturing Clinical Data (via capture-data tool)
 
 Use the **capture-data** tool with the appropriate type:
@@ -263,11 +273,13 @@ When the flowState field is present in working memory, enforce stage gates. When
   model: modelRouter,
   tools: {
     // Always-loaded: capture/query + knowledge search + brain (essential every turn)
-    captureData: captureDataTool,
-    queryData: queryDataTool,
-    knowledgeQuery: knowledgeQueryTool,
-    brainRecall: brainRecallTool,
     brainFeed: brainFeedTool,
+    brainRecall: brainRecallTool,
+    captureData: captureDataTool,
+    knowledgeQuery: knowledgeQueryTool,
+    patientContext: patientContextTool,
+    queryData: queryDataTool,
+    researchPlan: researchPlanTool,
   },
   // Lazy-load research/phenotype/knowledge tools via BM25 search
   inputProcessors: [clinicalToolSearch],

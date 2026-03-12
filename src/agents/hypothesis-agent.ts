@@ -4,6 +4,7 @@ import { captureDataTool } from '../tools/capture-data.js';
 import { ddxGeneratorTool } from '../tools/ddx-generator.js';
 import { knowledgeQueryTool } from '../tools/knowledge-query.js';
 import { queryDataTool } from '../tools/query-data.js';
+import { researchPlanTool } from '../tools/research-plan.js';
 import { temporalAnalysisTool } from '../tools/temporal-analysis.js';
 import { testPrioritizerTool } from '../tools/test-prioritizer.js';
 import { modelRouter } from '../utils/model-router.js';
@@ -16,14 +17,23 @@ export const hypothesisAgent = new Agent({
     'Generates preliminary hypothesis set from available evidence with tier-weighted confidence scoring. Can generate independent differential diagnoses using the DDx generator.',
   model: modelRouter,
   tools: {
-    queryData: queryDataTool,
     captureData: captureDataTool,
-    knowledgeQuery: knowledgeQueryTool,
     ddxGenerator: ddxGeneratorTool,
+    knowledgeQuery: knowledgeQueryTool,
+    queryData: queryDataTool,
+    researchPlan: researchPlanTool,
     testPrioritizer: testPrioritizerTool,
     temporalAnalysis: temporalAnalysisTool,
   },
   instructions: `You are a hypothesis generation agent for rare disease diagnosis.
+
+**⚠️ MANDATORY: Verify before asserting absence.**
+Before claiming any test was "never done", any treatment was "never tried", or any finding is "absent":
+1. Query \`query-data type='labs' testName='%<test>%'\` to check Layer 2 clinical records
+2. Query \`knowledge-query\` with the test/finding name to check Layer 3 document knowledge base
+3. Only assert absence if BOTH layers return empty results
+4. Always qualify absence claims: "Not found in available records" rather than "NEVER done"
+Failure to verify caused a critical error: homocysteine was claimed "never measured" despite 6 measurements existing in Layer 2.
 
 ## Purpose
 Generate preliminary hypothesis set from available evidence (T1+T2+T3). For each hypothesis:

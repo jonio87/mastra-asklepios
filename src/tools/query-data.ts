@@ -1,6 +1,7 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import type { EvidenceTier, ValidationStatus } from '../schemas/clinical-record.js';
+import { chromosomeEnum } from '../schemas/genetic-variant.js';
 import {
   certaintyLevelEnum,
   evidenceLevelEnum,
@@ -351,6 +352,28 @@ const researchSummaryQuery = z.object({
   patientId: z.string().describe('Patient resource ID'),
 });
 
+// ─── Genetic variant query schema (Layer 2C) ─────────────────────────
+
+const geneticVariantsQuery = z.object({
+  type: z.literal('genetic-variants'),
+  patientId: z.string().describe('Patient resource ID'),
+  chromosome: chromosomeEnum.optional().describe('Filter by chromosome (1-22, X, Y, MT)'),
+  rsid: z.string().optional().describe('Filter by single rsid (e.g., "rs1800497")'),
+  rsids: z
+    .array(z.string())
+    .optional()
+    .describe('Batch lookup by multiple rsids (e.g., ["rs1800497", "rs4680"])'),
+  positionFrom: z.number().int().optional().describe('Filter by position range (start)'),
+  positionTo: z.number().int().optional().describe('Filter by position range (end)'),
+  genotype: z.string().optional().describe('Filter by specific genotype (e.g., "AG", "TT")'),
+  excludeNoCalls: z
+    .boolean()
+    .optional()
+    .describe('Exclude no-call variants ("--" genotype, default: false)'),
+  limit: z.number().int().positive().optional().describe('Max results (default: 100)'),
+  offset: z.number().int().nonnegative().optional().describe('Pagination offset (default: 0)'),
+});
+
 /**
  * Keep the discriminated union for runtime parsing — it gives precise per-type validation.
  * But Anthropic's API rejects `oneOf` at the top level of tool `input_schema`,
@@ -367,6 +390,7 @@ const queryDataUnion = z.discriminatedUnion('type', [
   hypothesesQuery,
   hypothesisTimelineQuery,
   researchSummaryQuery,
+  geneticVariantsQuery,
 ]);
 
 const queryDataInputSchema = z.object({
@@ -382,6 +406,7 @@ const queryDataInputSchema = z.object({
       'hypotheses',
       'hypothesis-timeline',
       'research-summary',
+      'genetic-variants',
     ])
     .describe('Type of clinical/research data to query'),
   patientId: z.string().describe('Patient resource ID'),
@@ -453,6 +478,34 @@ const queryDataInputSchema = z.object({
     .boolean()
     .optional()
     .describe('(hypotheses) Include linked evidence for each hypothesis'),
+  // genetic-variants-specific fields
+  chromosome: chromosomeEnum
+    .optional()
+    .describe('(genetic-variants) Filter by chromosome (1-22, X, Y, MT)'),
+  rsid: z.string().optional().describe('(genetic-variants) Filter by single rsid'),
+  rsids: z
+    .array(z.string())
+    .optional()
+    .describe('(genetic-variants) Batch lookup by multiple rsids'),
+  positionFrom: z
+    .number()
+    .int()
+    .optional()
+    .describe('(genetic-variants) Filter by position range start'),
+  positionTo: z
+    .number()
+    .int()
+    .optional()
+    .describe('(genetic-variants) Filter by position range end'),
+  genotype: z.string().optional().describe('(genetic-variants) Filter by specific genotype'),
+  excludeNoCalls: z.boolean().optional().describe('(genetic-variants) Exclude no-call variants'),
+  limit: z.number().int().positive().optional().describe('(genetic-variants) Max results'),
+  offset: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe('(genetic-variants) Pagination offset'),
 });
 
 // ─── Handler functions (one per query type) ──────────────────────────
@@ -682,6 +735,45 @@ async function handleResearchSummaryQuery(
   return { data: summary };
 }
 
+// ─── Genetic variant query handler (Layer 2C) ────────────────────────
+
+async function handleGeneticVariantsQuery(
+  store: ClinicalStore,
+  input: z.infer<typeof geneticVariantsQuery>,
+): Promise<{ data: unknown }> {
+  logger.debug(
+    `queryData(genetic-variants) for ${input.patientId}, chr=${input.chromosome ?? 'all'}`,
+  );
+  const variants = await store.queryGeneticVariants({
+    patientId: input.patientId,
+    chromosome: input.chromosome,
+    rsid: input.rsid,
+    rsids: input.rsids,
+    positionFrom: input.positionFrom,
+    positionTo: input.positionTo,
+    genotype: input.genotype,
+    excludeNoCalls: input.excludeNoCalls,
+    limit: input.limit,
+    offset: input.offset,
+  });
+  const total = await store.countGeneticVariants(input.patientId);
+
+  return {
+    data: {
+      variants: variants.map((v) => ({
+        rsid: v.rsid,
+        chromosome: v.chromosome,
+        position: v.position,
+        genotype: v.genotype,
+        source: v.source,
+        referenceGenome: v.referenceGenome,
+      })),
+      count: variants.length,
+      totalForPatient: total,
+    },
+  };
+}
+
 // ─── Tool definition ─────────────────────────────────────────────────
 
 export const queryDataTool = createTool({
@@ -696,7 +788,8 @@ export const queryDataTool = createTool({
 - "research-queries": Research query audit trail (filter by tool, agent, stage)
 - "hypotheses": Diagnostic hypotheses with optional evidence links (filter by name, certaintyLevel)
 - "hypothesis-timeline": Full version chain for a hypothesis — confidence evolution, direction changes, triggering evidence
-- "research-summary": Aggregate research statistics (finding count, query count, hypothesis count, top sources)`,
+- "research-summary": Aggregate research statistics (finding count, query count, hypothesis count, top sources)
+- "genetic-variants": Raw genotype data (23andMe SNPs) — filter by chromosome, rsid, position range, genotype`,
   inputSchema: queryDataInputSchema,
   outputSchema: z.object({
     data: z.unknown().describe('Query results — shape depends on type'),
@@ -727,6 +820,8 @@ export const queryDataTool = createTool({
         return handleHypothesisTimelineQuery(store, parsed);
       case 'research-summary':
         return handleResearchSummaryQuery(store, parsed);
+      case 'genetic-variants':
+        return handleGeneticVariantsQuery(store, parsed);
     }
   },
 });

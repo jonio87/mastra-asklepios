@@ -32,13 +32,13 @@ export const biomedicalMcp = new MCPClient({
   servers: {
     biomcp: {
       command: 'uvx',
-      args: ['biomcp-cli', 'run'],
+      args: ['biomcp-cli', 'mcp'],
       env: ncbiEnv,
       timeout: 30_000,
     },
     gget: {
       command: 'uvx',
-      args: ['gget-mcp'],
+      args: ['gget-mcp', 'stdio'],
       timeout: 30_000,
     },
     biothings: {
@@ -46,11 +46,13 @@ export const biomedicalMcp = new MCPClient({
       args: ['biothings-mcp'],
       timeout: 30_000,
     },
-    pharmacology: {
-      command: 'uvx',
-      args: ['pharmacology-mcp'],
-      timeout: 30_000,
-    },
+    // pharmacology-mcp has a FastMCP version incompatibility bug (Mar 2026)
+    // Drug search covered by biocontext (FDA drugs, drug labels, therapeutic classes)
+    // pharmacology: {
+    //   command: 'uvx',
+    //   args: ['pharmacology-mcp', 'stdio'],
+    //   timeout: 30_000,
+    // },
     opengenes: {
       command: 'uvx',
       args: ['opengenes-mcp'],
@@ -67,8 +69,14 @@ export const biomedicalMcp = new MCPClient({
       timeout: 30_000,
     },
     opentargets: {
-      command: 'npx',
-      args: ['-y', 'opentargets-mcp'],
+      command: 'uvx',
+      args: [
+        '--from',
+        'git+https://github.com/opentargets/open-targets-platform-mcp',
+        'otp-mcp',
+        '--transport',
+        'stdio',
+      ],
       timeout: 30_000,
     },
   },

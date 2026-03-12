@@ -55,6 +55,7 @@ describe('ClinicalStore', () => {
         value: 4.37,
         unit: 'tys/µl',
         date: '2022-03-15',
+        source: 'Test Lab',
         patientId: TEST_PATIENT,
       });
       await store.addLabResult({
@@ -63,6 +64,7 @@ describe('ClinicalStore', () => {
         value: 3.78,
         unit: 'tys/µl',
         date: '2023-11-20',
+        source: 'Test Lab',
         patientId: TEST_PATIENT,
       });
       await store.addLabResult({
@@ -72,6 +74,7 @@ describe('ClinicalStore', () => {
         unit: 'tys/µl',
         flag: 'low',
         date: '2025-09-01',
+        source: 'Test Lab',
         patientId: TEST_PATIENT,
       });
 
@@ -102,6 +105,7 @@ describe('ClinicalStore', () => {
         value: 7.0,
         unit: 'tys/µl',
         date: '2025-01-01',
+        source: 'Test Lab',
         patientId: 'patient-other',
       });
 
@@ -137,6 +141,7 @@ describe('ClinicalStore', () => {
         value: 14.0,
         unit: 'g/dL',
         date: '2020-01-01',
+        source: 'Test Lab',
         patientId: TEST_PATIENT,
       });
       await store.addLabResult({
@@ -145,6 +150,7 @@ describe('ClinicalStore', () => {
         value: 12.5,
         unit: 'g/dL',
         date: '2022-01-01',
+        source: 'Test Lab',
         patientId: TEST_PATIENT,
       });
       await store.addLabResult({
@@ -154,6 +160,7 @@ describe('ClinicalStore', () => {
         unit: 'g/dL',
         flag: 'low',
         date: '2025-01-01',
+        source: 'Test Lab',
         patientId: TEST_PATIENT,
       });
 
@@ -172,6 +179,7 @@ describe('ClinicalStore', () => {
         value: 5.2,
         unit: 'mg/L',
         date: '2025-01-01',
+        source: 'Test Lab',
         patientId: TEST_PATIENT,
       });
 
@@ -471,6 +479,7 @@ describe('ClinicalStore', () => {
         value: 5.0,
         unit: 'mg/L',
         date: '2025-01-01',
+        source: 'Test Lab',
         patientId: TEST_PATIENT,
       });
       await store.addLabResult({
@@ -479,6 +488,7 @@ describe('ClinicalStore', () => {
         value: 8.0,
         unit: 'mg/L',
         date: '2025-01-01',
+        source: 'Test Lab',
         patientId: TEST_PATIENT,
       });
 
@@ -486,6 +496,106 @@ describe('ClinicalStore', () => {
       const found = results.filter((r) => r.id === 'lab-upsert-001');
       expect(found.length).toBe(1);
       expect(found[0]?.value).toBe(8.0);
+    });
+  });
+
+  // ─── Dedup Finder Methods ─────────────────────────────────────────
+
+  describe('dedup finders', () => {
+    it('findConsultation returns ID when match exists', async () => {
+      await store.addConsultation({
+        id: 'dedup-con-001',
+        provider: 'Dr. Finder',
+        specialty: 'Neurology',
+        date: '2025-06-01',
+        conclusionsStatus: 'documented',
+        patientId: TEST_PATIENT,
+        source: 'test-dedup',
+      });
+
+      const found = await store.findConsultation(
+        TEST_PATIENT,
+        'Neurology',
+        '2025-06-01',
+        'Dr. Finder',
+      );
+      expect(found).toBe('dedup-con-001');
+    });
+
+    it('findConsultation returns null when no match', async () => {
+      const found = await store.findConsultation(
+        TEST_PATIENT,
+        'Cardiology',
+        '2030-01-01',
+        'Dr. Nobody',
+      );
+      expect(found).toBeNull();
+    });
+
+    it('findTreatmentTrial returns ID when match exists', async () => {
+      await store.addTreatmentTrial({
+        id: 'dedup-trial-001',
+        medication: 'Gabapentin',
+        efficacy: 'minimal',
+        startDate: '2024-01-15',
+        drugClass: 'Anticonvulsant',
+        patientId: TEST_PATIENT,
+        source: 'test-dedup',
+      });
+
+      const found = await store.findTreatmentTrial(TEST_PATIENT, 'Gabapentin', '2024-01-15');
+      expect(found).toBe('dedup-trial-001');
+    });
+
+    it('findContradiction returns ID when match exists', async () => {
+      await store.addContradiction({
+        id: 'dedup-contra-001',
+        finding1: 'Test positive',
+        finding2: 'Test negative',
+        resolutionStatus: 'unresolved',
+        patientId: TEST_PATIENT,
+        source: 'test-dedup',
+      });
+
+      const found = await store.findContradiction(TEST_PATIENT, 'Test positive', 'Test negative');
+      expect(found).toBe('dedup-contra-001');
+    });
+
+    it('findPatientReport returns ID when match exists', async () => {
+      await store.addPatientReport({
+        id: 'dedup-pro-001',
+        date: '2025-07-01',
+        type: 'concern',
+        content: 'Unique dedup test content',
+        patientId: TEST_PATIENT,
+        source: 'test-dedup',
+      });
+
+      const found = await store.findPatientReport(
+        TEST_PATIENT,
+        'concern',
+        'Unique dedup test content',
+        '2025-07-01',
+      );
+      expect(found).toBe('dedup-pro-001');
+    });
+
+    it('findAgentLearning returns ID when match exists', async () => {
+      await store.addAgentLearning({
+        id: 'dedup-learn-001',
+        date: '2025-07-01',
+        category: 'diagnostic-clue',
+        content: 'Unique learning for dedup test',
+        patientId: TEST_PATIENT,
+        source: 'test-dedup',
+      });
+
+      const found = await store.findAgentLearning(
+        TEST_PATIENT,
+        'diagnostic-clue',
+        'Unique learning for dedup test',
+      );
+      expect(found).toBe('dedup-learn-001');
     });
   });
 });

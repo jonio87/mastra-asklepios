@@ -52,7 +52,7 @@ const interactionSchema = z.object({
 export const pharmacogenomicsScreenTool = createTool({
   id: 'pharmacogenomics-screen',
   description:
-    'Cross-reference patient medications with known genetic variants to produce a drug-gene interaction matrix. Queries DGIdb and PharmGKB via BioMCP. Auto-loads medications from Layer 2 treatment_trials and gene variants from research findings if not provided.',
+    'Cross-reference patient medications with known genetic variants to produce a drug-gene interaction matrix. Queries DGIdb and PharmGKB via BioMCP. Auto-loads medications from Layer 2 treatment_trials and gene variants from research findings if not provided. Reports availability of raw genotype data (23andMe) from genetic_variants table.',
   inputSchema: z.object({
     patientId: z.string().describe('Patient resource ID'),
     medications: z
@@ -135,6 +135,7 @@ interface StoreHandle {
     Array<{ externalId?: string | undefined; title: string; rawData?: string | undefined }>
   >;
   addResearchFinding(finding: Record<string, unknown>): Promise<unknown>;
+  countGeneticVariants(patientId: string): Promise<number>;
 }
 
 async function loadPatientMedications(
@@ -159,10 +160,21 @@ async function loadPatientGeneVariants(
   if (provided && provided.length > 0) return provided;
 
   const findings = await store.queryFindings({ patientId, externalIdType: 'gene' });
-  return findings.map((f) => ({
+  const variants = findings.map((f) => ({
     gene: f.externalId ?? f.title,
     ...(f.rawData ? { variant: f.rawData } : {}),
   }));
+
+  // Log availability of raw genotype data for context
+  const rawVariantCount = await store.countGeneticVariants(patientId);
+  if (rawVariantCount > 0) {
+    logger.info(
+      `Patient has ${rawVariantCount.toLocaleString()} raw genetic variants in database. ` +
+        `Use query-data tool with queryType=genetic-variants to look up specific rsids for pharmacogenomic analysis.`,
+    );
+  }
+
+  return variants;
 }
 
 async function queryInteractions(

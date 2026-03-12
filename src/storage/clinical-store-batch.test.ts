@@ -18,6 +18,7 @@ function makeLab(overrides: Partial<LabResult> & { id: string; testName: string 
     value: 5.0,
     unit: 'mg/dl',
     date: '2025-01-15',
+    source: 'Test Lab',
     ...overrides,
   };
 }

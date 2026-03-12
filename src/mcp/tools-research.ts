@@ -5,8 +5,10 @@ import { mastra } from '../mastra.js';
 import { adversarialSynthesisTool } from '../tools/adversarial-synthesis.js';
 import { citationVerifierTool } from '../tools/citation-verifier.js';
 import { parallelResearchTool } from '../tools/parallel-research.js';
+import { patientContextTool } from '../tools/patient-context.js';
 import { pharmacogenomicsScreenTool } from '../tools/pharmacogenomics-screen.js';
 import { phenotypeMatchTool } from '../tools/phenotype-match.js';
+import { researchPlanTool } from '../tools/research-plan.js';
 import { temporalAnalysisTool } from '../tools/temporal-analysis.js';
 import { testPrioritizerTool } from '../tools/test-prioritizer.js';
 import { trialEligibilityTool } from '../tools/trial-eligibility.js';
@@ -300,6 +302,73 @@ export function registerResearchTools(server: McpServer): void {
         {
           patientId: input.patientId,
           ...(hypotheses ? { hypotheses } : {}),
+        },
+        { mastra },
+      );
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    },
+  );
+
+  // ─── patient_context — build patient context summary ───────────────
+  server.registerTool(
+    'patient_context',
+    {
+      description:
+        'Build a structured patient context summary from Layer 2 clinical data. Returns Tier A (compact ~2K tokens: demographics, hypotheses, treatment landscape) and optionally Tier B (expanded ~8K tokens: lab trends, temporal map, research audit).',
+      inputSchema: {
+        patientId: z.string().describe('Patient identifier'),
+        includeTierB: z
+          .boolean()
+          .optional()
+          .describe(
+            'Include expanded Tier B context (lab trends, temporal map, research audit). Default: false',
+          ),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false },
+    },
+    async (input) => {
+      const result = await patientContextTool.execute?.(
+        {
+          patientId: input.patientId,
+          includeTierB: input.includeTierB ?? false,
+        },
+        { mastra },
+      );
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+    },
+  );
+
+  // ─── research_plan — generate prioritized research plan ────────────
+  server.registerTool(
+    'research_plan',
+    {
+      description:
+        'Generate a prioritized research plan from patient context. Analyzes hypotheses, evidence gaps, lab trends, and treatment failures to produce specific research questions grouped by urgency phase (immediate/short-term/deep-dive).',
+      inputSchema: {
+        patientId: z.string().describe('Patient identifier'),
+        focusHypotheses: z
+          .string()
+          .optional()
+          .describe(
+            'JSON array of hypothesis names to focus on. If empty, covers all active hypotheses.',
+          ),
+        maxQuestions: z
+          .number()
+          .int()
+          .min(1)
+          .max(30)
+          .optional()
+          .describe('Maximum number of research questions to generate (default: 15)'),
+      },
+      annotations: { readOnlyHint: true, destructiveHint: false },
+    },
+    async (input) => {
+      const focusHypotheses = input.focusHypotheses ? JSON.parse(input.focusHypotheses) : undefined;
+      const result = await researchPlanTool.execute?.(
+        {
+          patientId: input.patientId,
+          ...(focusHypotheses ? { focusHypotheses } : {}),
+          maxQuestions: input.maxQuestions ?? 15,
         },
         { mastra },
       );

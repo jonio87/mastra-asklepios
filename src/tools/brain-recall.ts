@@ -1,6 +1,7 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 
+import { getClinicalStore } from '../storage/clinical-store.js';
 import { logger } from '../utils/logger.js';
 
 const brainPatternSchema = z.object({
@@ -65,23 +66,57 @@ export const brainRecallTool = createTool({
       hpoTermCount: input.hpoTerms?.length ?? 0,
     });
 
-    // In the full implementation, this calls brainAgent.generate()
-    // with the patient's symptoms to retrieve matching patterns.
-    // For now, return an empty result indicating the brain is still learning.
+    const store = getClinicalStore();
 
-    const recommendation =
-      input.symptoms.length > 0
-        ? `Brain is still accumulating cases. No prior patterns found for: ${input.symptoms.slice(0, 3).join(', ')}. Proceed with standard research workflow.`
-        : 'No symptoms provided for brain recall query.';
+    // Query brain patterns matching the patient's symptoms
+    const patterns = await store.queryBrainPatterns({
+      symptoms: input.symptoms,
+      hpoTerms: input.hpoTerms,
+    });
+
+    const totalCases = await store.getBrainCaseCount();
+
+    // Map stored patterns to output format
+    const outputPatterns = patterns.map((p) => ({
+      pattern: p.pattern,
+      relevance: p.confidence,
+      category: p.category,
+      supportingCases: p.supportingCases,
+    }));
+
+    // Build recommendation
+    let recommendation: string;
+    if (outputPatterns.length === 0) {
+      recommendation =
+        totalCases > 0
+          ? `No matching patterns found for: ${input.symptoms.slice(0, 3).join(', ')}. Brain has ${totalCases} cases but none match this presentation. Proceed with standard research workflow.`
+          : 'Brain has no cases yet. Proceed with standard research workflow. Feed cases after diagnostic conclusions to build the pattern database.';
+    } else {
+      const topPattern = outputPatterns[0];
+      const shortcutCount = outputPatterns.filter(
+        (p) => p.category === 'diagnostic-shortcut',
+      ).length;
+      const misdiagCount = outputPatterns.filter(
+        (p) => p.category === 'common-misdiagnosis',
+      ).length;
+
+      const parts: string[] = [
+        `Found ${outputPatterns.length} matching patterns from ${totalCases} cases.`,
+      ];
+      if (shortcutCount > 0) parts.push(`${shortcutCount} diagnostic shortcut(s) available.`);
+      if (misdiagCount > 0) parts.push(`${misdiagCount} common misdiagnosis warning(s).`);
+      if (topPattern) parts.push(`Top pattern: ${topPattern.pattern}`);
+      recommendation = parts.join(' ');
+    }
 
     logger.info('Brain recall: query complete', {
-      patternsFound: 0,
-      totalCases: 0,
+      patternsFound: outputPatterns.length,
+      totalCases,
     });
 
     return {
-      patterns: [],
-      totalCasesInBrain: 0,
+      patterns: outputPatterns,
+      totalCasesInBrain: totalCases,
       querySymptoms: input.symptoms,
       recommendation,
     };

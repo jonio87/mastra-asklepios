@@ -1,15 +1,23 @@
 import { createHash } from 'node:crypto';
-import type { Client } from '@libsql/client';
+import type { Client, InValue } from '@libsql/client';
 import { createClient } from '@libsql/client';
 import type {
+  BrainPattern,
+  BrainPatternInput,
+  BrainPatternQuery,
+} from '../schemas/brain-pattern.js';
+import type {
+  AbdominalReport,
   AgentLearning,
   Consultation,
   Contradiction,
+  ImagingReport,
   LabResult,
   LabTrend,
   PatientReport,
   TreatmentTrial,
 } from '../schemas/clinical-record.js';
+import type { GeneticVariant, GeneticVariantQuery } from '../schemas/genetic-variant.js';
 import type {
   HypothesisEvidenceLink,
   ResearchFinding,
@@ -151,6 +159,46 @@ export class ClinicalStore {
             )`,
       `CREATE INDEX IF NOT EXISTS idx_learnings_patient_cat ON clinical_agent_learnings(patient_id, category)`,
 
+      // ─── Imaging Reports ───────────────────────────────────────────
+      `CREATE TABLE IF NOT EXISTS clinical_imaging_reports (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                modality TEXT NOT NULL,
+                body_region TEXT NOT NULL,
+                date TEXT NOT NULL,
+                facility TEXT,
+                physician TEXT,
+                technique TEXT,
+                findings TEXT,
+                impression TEXT,
+                comparison TEXT,
+                source TEXT,
+                evidence_tier TEXT,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
+      `CREATE INDEX IF NOT EXISTS idx_imaging_patient ON clinical_imaging_reports(patient_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_imaging_modality ON clinical_imaging_reports(patient_id, modality)`,
+
+      // ─── Abdominal Reports ─────────────────────────────────────────
+      `CREATE TABLE IF NOT EXISTS clinical_abdominal_reports (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                procedure_type TEXT NOT NULL,
+                date TEXT NOT NULL,
+                facility TEXT,
+                physician TEXT,
+                findings TEXT,
+                conclusions TEXT,
+                source TEXT,
+                evidence_tier TEXT,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
+      `CREATE INDEX IF NOT EXISTS idx_abdominal_patient ON clinical_abdominal_reports(patient_id)`,
+
       // ─── Layer 2B: Research Data Store ──────────────────────────────
       `CREATE TABLE IF NOT EXISTS research_findings (
                 id TEXT PRIMARY KEY,
@@ -241,6 +289,43 @@ export class ClinicalStore {
       `CREATE INDEX IF NOT EXISTS idx_links_hypothesis ON hypothesis_evidence_links(hypothesis_id)`,
       `CREATE INDEX IF NOT EXISTS idx_links_finding ON hypothesis_evidence_links(finding_id)`,
       `CREATE INDEX IF NOT EXISTS idx_links_clinical ON hypothesis_evidence_links(clinical_record_id)`,
+
+      // ─── Layer 2C: Genetic Variants ─────────────────────────────────
+      `CREATE TABLE IF NOT EXISTS genetic_variants (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                rsid TEXT NOT NULL,
+                chromosome TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                genotype TEXT NOT NULL,
+                source TEXT NOT NULL,
+                source_version TEXT,
+                reference_genome TEXT NOT NULL DEFAULT 'GRCh37',
+                import_date TEXT NOT NULL,
+                raw_line TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
+      `CREATE INDEX IF NOT EXISTS idx_variants_patient ON genetic_variants(patient_id)`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_variants_rsid ON genetic_variants(patient_id, rsid)`,
+      `CREATE INDEX IF NOT EXISTS idx_variants_chr_pos ON genetic_variants(patient_id, chromosome, position)`,
+      `CREATE INDEX IF NOT EXISTS idx_variants_genotype ON genetic_variants(patient_id, genotype)`,
+
+      // ─── Layer 3: Brain Patterns ──────────────────────────────────────
+      `CREATE TABLE IF NOT EXISTS brain_patterns (
+                id TEXT PRIMARY KEY,
+                pattern TEXT NOT NULL,
+                category TEXT NOT NULL,
+                phenotype_cluster TEXT NOT NULL,
+                supporting_cases INTEGER DEFAULT 1,
+                confidence REAL DEFAULT 0.5,
+                related_diagnoses TEXT,
+                related_genes TEXT,
+                source_case_labels TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
+      `CREATE INDEX IF NOT EXISTS idx_brain_patterns_category ON brain_patterns(category)`,
+      `CREATE INDEX IF NOT EXISTS idx_brain_patterns_confidence ON brain_patterns(confidence)`,
     ];
 
     for (const sql of statements) {
@@ -267,6 +352,39 @@ export class ClinicalStore {
           });
       }
     }
+    // Migration: add source column to non-lab tables for provenance tracking
+    const sourceTables = [
+      'clinical_consultations',
+      'clinical_treatment_trials',
+      'clinical_contradictions',
+      'clinical_patient_reports',
+      'clinical_agent_learnings',
+    ];
+    for (const table of sourceTables) {
+      await this.client.execute(`ALTER TABLE ${table} ADD COLUMN source TEXT`).catch(() => {
+        /* column already exists */
+      });
+    }
+
+    // Migration: add document_category column to all clinical tables (FHIR alignment)
+    const categoryMapping: Record<string, string> = {
+      clinical_lab_results: 'diagnostic-report',
+      clinical_imaging_reports: 'diagnostic-report',
+      clinical_abdominal_reports: 'diagnostic-report',
+      clinical_consultations: 'encounter',
+      clinical_treatment_trials: 'medication-statement',
+      clinical_contradictions: 'clinical-impression',
+      clinical_patient_reports: 'patient-observation',
+      clinical_agent_learnings: 'clinical-impression',
+    };
+    for (const [table, category] of Object.entries(categoryMapping)) {
+      await this.client
+        .execute(`ALTER TABLE ${table} ADD COLUMN document_category TEXT DEFAULT '${category}'`)
+        .catch(() => {
+          /* column already exists */
+        });
+    }
+
     // Migration: add content_hash column to research_findings
     await this.client
       .execute(`ALTER TABLE research_findings ADD COLUMN content_hash TEXT`)
@@ -289,12 +407,17 @@ export class ClinicalStore {
 
   async addLabResult(lab: LabResult): Promise<void> {
     await this.ensureInitialized();
+    this.requireLabSource(lab);
     await this.client.execute(this.labResultStatement(lab));
   }
 
   async addLabResultsBatch(labs: LabResult[]): Promise<{ inserted: number }> {
     await this.ensureInitialized();
     if (labs.length === 0) return { inserted: 0 };
+
+    for (const lab of labs) {
+      this.requireLabSource(lab);
+    }
 
     const stmts = labs.map((lab) => this.labResultStatement(lab));
 
@@ -304,6 +427,15 @@ export class ClinicalStore {
     }
 
     return { inserted: labs.length };
+  }
+
+  /** Reject lab entries without source attribution to prevent hallucinated data. */
+  private requireLabSource(lab: LabResult): void {
+    if (!lab.source || lab.source.trim() === '') {
+      throw new Error(
+        `Lab result for "${lab.testName}" rejected: source is required (prevents agent-hallucinated entries)`,
+      );
+    }
   }
 
   private labResultStatement(lab: LabResult) {
@@ -328,6 +460,59 @@ export class ClinicalStore {
         lab.sourceCredibility ?? null,
       ],
     };
+  }
+
+  /**
+   * Returns all distinct patient_id values found across clinical tables.
+   * Useful for detecting ID mismatches (e.g., 'tomasz-szychliński' vs 'patient-tomasz-szychlinski').
+   */
+  async getPatientIds(): Promise<string[]> {
+    await this.ensureInitialized();
+    const tables = [
+      'clinical_lab_results',
+      'clinical_treatment_trials',
+      'clinical_consultations',
+      'research_findings',
+      'research_hypotheses',
+    ];
+    const ids = new Set<string>();
+    for (const table of tables) {
+      const result = await this.client.execute({
+        sql: `SELECT DISTINCT patient_id FROM ${table}`,
+        args: [],
+      });
+      for (const row of result.rows) {
+        const pid = row['patient_id'];
+        if (typeof pid === 'string') ids.add(pid);
+      }
+    }
+    return Array.from(ids);
+  }
+
+  /**
+   * Warns if a patient_id returns 0 results but similar IDs exist.
+   * Call this from query methods to detect silent ID mismatches.
+   */
+  private async warnIfIdMismatch(patientId: string, table: string, resultCount: number): Promise<void> {
+    if (resultCount > 0) return;
+    // Extract the base name (remove 'patient-' prefix, normalize unicode)
+    const baseName = patientId.replace(/^patient-/, '').normalize('NFC').toLowerCase();
+    const result = await this.client.execute({
+      sql: `SELECT DISTINCT patient_id FROM ${table} WHERE patient_id LIKE ?`,
+      args: [`%${baseName.slice(0, 6)}%`],
+    });
+    const otherIds = result.rows
+      .map((r) => String(r['patient_id']))
+      .filter((id) => id !== patientId);
+    if (otherIds.length > 0) {
+      logger.warn('Patient ID mismatch detected', {
+        queriedId: patientId,
+        table,
+        resultCount: 0,
+        similarIds: otherIds,
+        hint: 'Data may exist under a different patient ID. Run scripts/normalize-patient-ids.ts to fix.',
+      });
+    }
   }
 
   async queryLabs(params: {
@@ -368,7 +553,7 @@ export class ClinicalStore {
       args,
     });
 
-    return result.rows.map((row) => ({
+    const labs = result.rows.map((row) => ({
       id: String(row['id']),
       patientId: String(row['patient_id']),
       testName: String(row['test_name']),
@@ -381,6 +566,9 @@ export class ClinicalStore {
       notes: row['notes'] ? String(row['notes']) : undefined,
       ...mapProvenance(row as Record<string, unknown>),
     }));
+
+    await this.warnIfIdMismatch(params.patientId, 'clinical_lab_results', labs.length);
+    return labs;
   }
 
   async getLabTrends(params: {
@@ -435,8 +623,8 @@ export class ClinicalStore {
       sql: `INSERT OR REPLACE INTO clinical_treatment_trials
                 (id, patient_id, medication, drug_class, indication, start_date, end_date,
                  dosage, efficacy, side_effects, reason_discontinued, adequate_trial,
-                 evidence_tier, validation_status, source_credibility)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 evidence_tier, validation_status, source_credibility, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         trial.id,
         trial.patientId,
@@ -453,6 +641,7 @@ export class ClinicalStore {
         trial.evidenceTier ?? null,
         trial.validationStatus ?? null,
         trial.sourceCredibility ?? null,
+        trial.source ?? null,
       ],
     });
   }
@@ -483,6 +672,22 @@ export class ClinicalStore {
     return result.rows.map(mapRowToTreatmentTrial);
   }
 
+  /** Check if a treatment trial with the same (patientId, medication, startDate) exists. */
+  async findTreatmentTrial(
+    patientId: string,
+    medication: string,
+    startDate: string | null,
+  ): Promise<string | null> {
+    await this.ensureInitialized();
+    const result = await this.client.execute({
+      sql: `SELECT id FROM clinical_treatment_trials
+            WHERE patient_id = ? AND medication = ? AND (start_date = ? OR (start_date IS NULL AND ? IS NULL))
+            LIMIT 1`,
+      args: [patientId, medication, startDate, startDate],
+    });
+    return result.rows.length > 0 ? String(result.rows[0]?.['id']) : null;
+  }
+
   // ─── Consultations ────────────────────────────────────────────────────
 
   async addConsultation(consultation: Consultation): Promise<void> {
@@ -491,8 +696,8 @@ export class ClinicalStore {
       sql: `INSERT OR REPLACE INTO clinical_consultations
                 (id, patient_id, provider, specialty, institution, date, reason, findings,
                  conclusions, conclusions_status, recommendations,
-                 evidence_tier, validation_status, source_credibility)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 evidence_tier, validation_status, source_credibility, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         consultation.id,
         consultation.patientId,
@@ -508,6 +713,7 @@ export class ClinicalStore {
         consultation.evidenceTier ?? null,
         consultation.validationStatus ?? null,
         consultation.sourceCredibility ?? null,
+        consultation.source ?? null,
       ],
     });
   }
@@ -553,6 +759,23 @@ export class ClinicalStore {
     }));
   }
 
+  /** Check if a consultation with the same (patientId, specialty, date, provider) exists. */
+  async findConsultation(
+    patientId: string,
+    specialty: string,
+    date: string,
+    provider: string,
+  ): Promise<string | null> {
+    await this.ensureInitialized();
+    const result = await this.client.execute({
+      sql: `SELECT id FROM clinical_consultations
+            WHERE patient_id = ? AND specialty = ? AND date = ? AND provider = ?
+            LIMIT 1`,
+      args: [patientId, specialty, date, provider],
+    });
+    return result.rows.length > 0 ? String(result.rows[0]?.['id']) : null;
+  }
+
   // ─── Contradictions ───────────────────────────────────────────────────
 
   async addContradiction(contradiction: Contradiction): Promise<void> {
@@ -562,8 +785,8 @@ export class ClinicalStore {
                 (id, patient_id, finding1, finding1_date, finding1_method,
                  finding2, finding2_date, finding2_method,
                  resolution_status, resolution_plan, diagnostic_impact,
-                 evidence_tier, validation_status, source_credibility)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 evidence_tier, validation_status, source_credibility, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         contradiction.id,
         contradiction.patientId,
@@ -579,6 +802,7 @@ export class ClinicalStore {
         contradiction.evidenceTier ?? null,
         contradiction.validationStatus ?? null,
         contradiction.sourceCredibility ?? null,
+        contradiction.source ?? null,
       ],
     });
   }
@@ -617,6 +841,22 @@ export class ClinicalStore {
     }));
   }
 
+  /** Check if a contradiction with the same (patientId, finding1, finding2) exists. */
+  async findContradiction(
+    patientId: string,
+    finding1: string,
+    finding2: string,
+  ): Promise<string | null> {
+    await this.ensureInitialized();
+    const result = await this.client.execute({
+      sql: `SELECT id FROM clinical_contradictions
+            WHERE patient_id = ? AND finding1 = ? AND finding2 = ?
+            LIMIT 1`,
+      args: [patientId, finding1, finding2],
+    });
+    return result.rows.length > 0 ? String(result.rows[0]?.['id']) : null;
+  }
+
   // ─── Patient Reports (PROs) ───────────────────────────────────────────
 
   async addPatientReport(report: PatientReport): Promise<void> {
@@ -624,8 +864,8 @@ export class ClinicalStore {
     await this.client.execute({
       sql: `INSERT OR REPLACE INTO clinical_patient_reports
                 (id, patient_id, date, type, content, severity, extracted_insights,
-                 evidence_tier, validation_status, source_credibility)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 evidence_tier, validation_status, source_credibility, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         report.id,
         report.patientId,
@@ -637,6 +877,7 @@ export class ClinicalStore {
         report.evidenceTier ?? null,
         report.validationStatus ?? null,
         report.sourceCredibility ?? null,
+        report.source ?? null,
       ],
     });
   }
@@ -683,6 +924,22 @@ export class ClinicalStore {
     }));
   }
 
+  /** Check if a patient report with the same (patientId, type, content) exists. */
+  async findPatientReport(
+    patientId: string,
+    type: string,
+    content: string,
+  ): Promise<string | null> {
+    await this.ensureInitialized();
+    const result = await this.client.execute({
+      sql: `SELECT id FROM clinical_patient_reports
+            WHERE patient_id = ? AND type = ? AND content = ?
+            LIMIT 1`,
+      args: [patientId, type, content],
+    });
+    return result.rows.length > 0 ? String(result.rows[0]?.['id']) : null;
+  }
+
   // ─── Agent Learnings ──────────────────────────────────────────────────
 
   async addAgentLearning(learning: AgentLearning): Promise<void> {
@@ -690,8 +947,8 @@ export class ClinicalStore {
     await this.client.execute({
       sql: `INSERT OR REPLACE INTO clinical_agent_learnings
                 (id, patient_id, date, category, content, confidence, related_hypotheses,
-                 evidence_tier, validation_status, source_credibility)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 evidence_tier, validation_status, source_credibility, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         learning.id,
         learning.patientId,
@@ -703,6 +960,7 @@ export class ClinicalStore {
         learning.evidenceTier ?? null,
         learning.validationStatus ?? null,
         learning.sourceCredibility ?? null,
+        learning.source ?? null,
       ],
     });
   }
@@ -734,6 +992,110 @@ export class ClinicalStore {
         : undefined,
       ...mapProvenance(row as Record<string, unknown>),
     }));
+  }
+
+  /** Check if an agent learning with the same (patientId, category, content) exists. */
+  async findAgentLearning(
+    patientId: string,
+    category: string,
+    content: string,
+  ): Promise<string | null> {
+    await this.ensureInitialized();
+    const result = await this.client.execute({
+      sql: `SELECT id FROM clinical_agent_learnings
+            WHERE patient_id = ? AND category = ? AND content = ?
+            LIMIT 1`,
+      args: [patientId, category, content],
+    });
+    return result.rows.length > 0 ? String(result.rows[0]?.['id']) : null;
+  }
+
+  // ─── Imaging Reports ───────────────────────────────────────────────────
+
+  async addImagingReport(report: ImagingReport): Promise<void> {
+    await this.ensureInitialized();
+    await this.client.execute({
+      sql: `INSERT OR REPLACE INTO clinical_imaging_reports
+                (id, patient_id, modality, body_region, date, facility, physician,
+                 technique, findings, impression, comparison, source,
+                 evidence_tier, validation_status, source_credibility)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        report.id,
+        report.patientId,
+        report.modality,
+        report.bodyRegion,
+        report.date,
+        report.facility ?? null,
+        report.physician ?? null,
+        report.technique ?? null,
+        report.findings ?? null,
+        report.impression ?? null,
+        report.comparison ?? null,
+        report.source ?? null,
+        report.evidenceTier ?? null,
+        report.validationStatus ?? null,
+        report.sourceCredibility ?? null,
+      ],
+    });
+  }
+
+  async getImagingReports(
+    patientId: string,
+    filters?: { modality?: string; bodyRegion?: string },
+  ): Promise<ImagingReport[]> {
+    await this.ensureInitialized();
+    let sql = 'SELECT * FROM clinical_imaging_reports WHERE patient_id = ?';
+    const args: InValue[] = [patientId];
+
+    if (filters?.modality) {
+      sql += ' AND modality = ?';
+      args.push(filters.modality);
+    }
+    if (filters?.bodyRegion) {
+      sql += ' AND body_region = ?';
+      args.push(filters.bodyRegion);
+    }
+    sql += ' ORDER BY date DESC';
+
+    const result = await this.client.execute({ sql, args });
+    return result.rows.map((r) => mapRowToImagingReport(r as Record<string, unknown>));
+  }
+
+  // ─── Abdominal Reports ────────────────────────────────────────────────
+
+  async addAbdominalReport(report: AbdominalReport): Promise<void> {
+    await this.ensureInitialized();
+    await this.client.execute({
+      sql: `INSERT OR REPLACE INTO clinical_abdominal_reports
+                (id, patient_id, procedure_type, date, facility, physician,
+                 findings, conclusions, source,
+                 evidence_tier, validation_status, source_credibility)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        report.id,
+        report.patientId,
+        report.procedureType,
+        report.date,
+        report.facility ?? null,
+        report.physician ?? null,
+        report.findings ?? null,
+        report.conclusions ?? null,
+        report.source ?? null,
+        report.evidenceTier ?? null,
+        report.validationStatus ?? null,
+        report.sourceCredibility ?? null,
+      ],
+    });
+  }
+
+  async getAbdominalReports(patientId: string): Promise<AbdominalReport[]> {
+    await this.ensureInitialized();
+    const result = await this.client.execute({
+      sql: 'SELECT * FROM clinical_abdominal_reports WHERE patient_id = ? ORDER BY date DESC',
+      args: [patientId],
+    });
+    return result.rows.map((r) => mapRowToAbdominalReport(r as Record<string, unknown>));
   }
 
   // ─── Research Findings ──────────────────────────────────────────────────
@@ -1409,6 +1771,287 @@ export class ClinicalStore {
     }
   }
 
+  // ─── Brain Patterns ──────────────────────────────────────────────────
+
+  async addBrainPattern(input: BrainPatternInput): Promise<{ id: string; merged: boolean }> {
+    await this.ensureInitialized();
+
+    // Check for existing similar pattern (same category + overlapping phenotype cluster)
+    const existing = await this.findSimilarPattern(
+      input.pattern,
+      input.category,
+      input.phenotypeCluster,
+    );
+
+    if (existing) {
+      // Merge: increment supporting cases, update confidence, add case labels
+      const mergedCaseLabels = [
+        ...new Set([...existing.sourceCaseLabels, ...input.sourceCaseLabels]),
+      ];
+      const newSupportingCases = existing.supportingCases + input.supportingCases;
+      const newConfidence = Math.min(1, existing.confidence + 0.1 * input.supportingCases);
+
+      await this.client.execute({
+        sql: `UPDATE brain_patterns SET
+          supporting_cases = ?,
+          confidence = ?,
+          source_case_labels = ?,
+          updated_at = datetime('now')
+          WHERE id = ?`,
+        args: [newSupportingCases, newConfidence, JSON.stringify(mergedCaseLabels), existing.id],
+      });
+
+      return { id: existing.id, merged: true };
+    }
+
+    // Insert new pattern
+    const id = `bp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const now = new Date().toISOString();
+
+    await this.client.execute({
+      sql: `INSERT INTO brain_patterns (id, pattern, category, phenotype_cluster, supporting_cases, confidence, related_diagnoses, related_genes, source_case_labels, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        id,
+        input.pattern,
+        input.category,
+        JSON.stringify(input.phenotypeCluster),
+        input.supportingCases,
+        input.confidence,
+        input.relatedDiagnoses ? JSON.stringify(input.relatedDiagnoses) : null,
+        input.relatedGenes ? JSON.stringify(input.relatedGenes) : null,
+        JSON.stringify(input.sourceCaseLabels),
+        now,
+        now,
+      ],
+    });
+
+    return { id, merged: false };
+  }
+
+  private async findSimilarPattern(
+    _pattern: string,
+    category: string,
+    phenotypeCluster: string[],
+  ): Promise<BrainPattern | null> {
+    await this.ensureInitialized();
+
+    // Find patterns with same category
+    const result = await this.client.execute({
+      sql: `SELECT * FROM brain_patterns WHERE category = ? ORDER BY confidence DESC`,
+      args: [category],
+    });
+
+    // Check for phenotype cluster overlap (Jaccard similarity > 0.5)
+    for (const row of result.rows) {
+      const existing = mapRowToBrainPattern(row as Record<string, unknown>);
+      const existingSet = new Set(existing.phenotypeCluster);
+      const inputSet = new Set(phenotypeCluster);
+      const intersection = [...inputSet].filter((t) => existingSet.has(t)).length;
+      const union = new Set([...existingSet, ...inputSet]).size;
+
+      if (union > 0 && intersection / union > 0.5) {
+        return existing;
+      }
+    }
+
+    return null;
+  }
+
+  async queryBrainPatterns(query: BrainPatternQuery): Promise<BrainPattern[]> {
+    await this.ensureInitialized();
+
+    const conditions: string[] = [];
+    const args: (string | number | null)[] = [];
+
+    if (query.category) {
+      conditions.push('category = ?');
+      args.push(query.category);
+    }
+    if (query.minConfidence !== undefined) {
+      conditions.push('confidence >= ?');
+      args.push(query.minConfidence);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = query.limit ?? 20;
+
+    const result = await this.client.execute({
+      sql: `SELECT * FROM brain_patterns ${whereClause} ORDER BY confidence DESC, supporting_cases DESC LIMIT ?`,
+      args: [...args, limit],
+    });
+
+    let patterns = result.rows.map((row) => mapRowToBrainPattern(row as Record<string, unknown>));
+
+    // Filter by symptom/HPO term overlap if provided
+    const queryTerms = [...(query.symptoms ?? []), ...(query.hpoTerms ?? [])];
+    if (queryTerms.length > 0) {
+      const querySet = new Set(queryTerms.map((t) => t.toLowerCase()));
+      patterns = patterns
+        .map((p) => {
+          const clusterSet = new Set(p.phenotypeCluster.map((t) => t.toLowerCase()));
+          const overlap = [...querySet].filter((t) => clusterSet.has(t)).length;
+          return { pattern: p, overlap };
+        })
+        .filter((x) => x.overlap > 0)
+        .sort((a, b) => b.overlap - a.overlap)
+        .map((x) => x.pattern);
+    }
+
+    return patterns;
+  }
+
+  async getBrainPatternCount(): Promise<number> {
+    await this.ensureInitialized();
+    const result = await this.client.execute('SELECT COUNT(*) as cnt FROM brain_patterns');
+    const row = result.rows[0];
+    return Number(row?.['cnt'] ?? 0);
+  }
+
+  async getBrainCaseCount(): Promise<number> {
+    await this.ensureInitialized();
+    const result = await this.client.execute('SELECT source_case_labels FROM brain_patterns');
+    const allLabels = new Set<string>();
+    for (const row of result.rows) {
+      const labels = JSON.parse(String(row['source_case_labels'] ?? '[]')) as string[];
+      for (const label of labels) {
+        allLabels.add(label);
+      }
+    }
+    return allLabels.size;
+  }
+
+  // ─── Genetic Variants ────────────────────────────────────────────────
+
+  async addGeneticVariant(variant: GeneticVariant): Promise<{ id: string; duplicate: boolean }> {
+    await this.ensureInitialized();
+    try {
+      await this.client.execute({
+        sql: `INSERT INTO genetic_variants
+              (id, patient_id, rsid, chromosome, position, genotype, source, source_version, reference_genome, import_date, raw_line)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          variant.id,
+          variant.patientId,
+          variant.rsid,
+          variant.chromosome,
+          variant.position,
+          variant.genotype,
+          variant.source,
+          variant.sourceVersion ?? null,
+          variant.referenceGenome,
+          variant.importDate,
+          variant.rawLine ?? null,
+        ],
+      });
+      return { id: variant.id, duplicate: false };
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes('UNIQUE constraint failed')) {
+        return { id: variant.id, duplicate: true };
+      }
+      throw err;
+    }
+  }
+
+  async addGeneticVariantsBatch(
+    variants: GeneticVariant[],
+  ): Promise<{ inserted: number; duplicates: number }> {
+    await this.ensureInitialized();
+    if (variants.length === 0) return { inserted: 0, duplicates: 0 };
+
+    const stmts = variants.map((v) => ({
+      sql: `INSERT OR IGNORE INTO genetic_variants
+            (id, patient_id, rsid, chromosome, position, genotype, source, source_version, reference_genome, import_date, raw_line)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        v.id,
+        v.patientId,
+        v.rsid,
+        v.chromosome,
+        v.position,
+        v.genotype,
+        v.source,
+        v.sourceVersion ?? null,
+        v.referenceGenome,
+        v.importDate,
+        v.rawLine ?? null,
+      ] as InValue[],
+    }));
+
+    const results = await this.client.batch(stmts, 'write');
+    let inserted = 0;
+    for (const r of results) {
+      if (r.rowsAffected > 0) inserted++;
+    }
+    return { inserted, duplicates: variants.length - inserted };
+  }
+
+  async queryGeneticVariants(params: GeneticVariantQuery): Promise<GeneticVariant[]> {
+    await this.ensureInitialized();
+    const conditions = ['patient_id = ?'];
+    const args: InValue[] = [params.patientId];
+
+    if (params.chromosome) {
+      conditions.push('chromosome = ?');
+      args.push(params.chromosome);
+    }
+    if (params.rsid) {
+      conditions.push('rsid = ?');
+      args.push(params.rsid);
+    }
+    if (params.rsids && params.rsids.length > 0) {
+      const placeholders = params.rsids.map(() => '?').join(', ');
+      conditions.push(`rsid IN (${placeholders})`);
+      for (const r of params.rsids) args.push(r);
+    }
+    if (params.positionFrom !== undefined) {
+      conditions.push('position >= ?');
+      args.push(params.positionFrom);
+    }
+    if (params.positionTo !== undefined) {
+      conditions.push('position <= ?');
+      args.push(params.positionTo);
+    }
+    if (params.genotype) {
+      conditions.push('genotype = ?');
+      args.push(params.genotype);
+    }
+    if (params.excludeNoCalls) {
+      conditions.push("genotype != '--'");
+    }
+
+    const limit = params.limit ?? 100;
+    const offset = params.offset ?? 0;
+
+    const result = await this.client.execute({
+      sql: `SELECT * FROM genetic_variants WHERE ${conditions.join(' AND ')} ORDER BY chromosome, position LIMIT ? OFFSET ?`,
+      args: [...args, limit, offset],
+    });
+
+    return result.rows.map((row) => mapRowToGeneticVariant(row as Record<string, unknown>));
+  }
+
+  async countGeneticVariants(patientId: string): Promise<number> {
+    await this.ensureInitialized();
+    const result = await this.client.execute({
+      sql: 'SELECT COUNT(*) as cnt FROM genetic_variants WHERE patient_id = ?',
+      args: [patientId],
+    });
+    const row = result.rows[0];
+    return row ? Number(row['cnt']) : 0;
+  }
+
+  async getVariantByRsid(patientId: string, rsid: string): Promise<GeneticVariant | undefined> {
+    await this.ensureInitialized();
+    const result = await this.client.execute({
+      sql: 'SELECT * FROM genetic_variants WHERE patient_id = ? AND rsid = ?',
+      args: [patientId, rsid],
+    });
+    const row = result.rows[0];
+    if (!row) return undefined;
+    return mapRowToGeneticVariant(row as Record<string, unknown>);
+  }
+
   // ─── Cleanup ──────────────────────────────────────────────────────────
 
   async close(): Promise<void> {
@@ -1422,6 +2065,23 @@ function optStr(val: unknown): string | undefined {
   return val ? String(val) : undefined;
 }
 
+function mapRowToGeneticVariant(row: Record<string, unknown>): GeneticVariant {
+  const result: GeneticVariant = {
+    id: String(row['id']),
+    patientId: String(row['patient_id']),
+    rsid: String(row['rsid']),
+    chromosome: String(row['chromosome']) as GeneticVariant['chromosome'],
+    position: Number(row['position']),
+    genotype: String(row['genotype']),
+    source: String(row['source']),
+    referenceGenome: String(row['reference_genome']),
+    importDate: String(row['import_date']),
+  };
+  if (row['source_version']) result.sourceVersion = String(row['source_version']);
+  if (row['raw_line']) result.rawLine = String(row['raw_line']);
+  return result;
+}
+
 function mapProvenance(row: Record<string, unknown>): {
   evidenceTier?: LabResult['evidenceTier'];
   validationStatus?: LabResult['validationStatus'];
@@ -1433,6 +2093,39 @@ function mapProvenance(row: Record<string, unknown>): {
   if (row['source_credibility'] !== null && row['source_credibility'] !== undefined)
     result['sourceCredibility'] = Number(row['source_credibility']);
   return result as ReturnType<typeof mapProvenance>;
+}
+
+function mapRowToImagingReport(row: Record<string, unknown>): ImagingReport {
+  return {
+    id: String(row['id']),
+    patientId: String(row['patient_id']),
+    modality: String(row['modality']),
+    bodyRegion: String(row['body_region']),
+    date: String(row['date']),
+    facility: optStr(row['facility']),
+    physician: optStr(row['physician']),
+    technique: optStr(row['technique']),
+    findings: optStr(row['findings']),
+    impression: optStr(row['impression']),
+    comparison: optStr(row['comparison']),
+    source: optStr(row['source']),
+    ...mapProvenance(row),
+  } as ImagingReport;
+}
+
+function mapRowToAbdominalReport(row: Record<string, unknown>): AbdominalReport {
+  return {
+    id: String(row['id']),
+    patientId: String(row['patient_id']),
+    procedureType: String(row['procedure_type']),
+    date: String(row['date']),
+    facility: optStr(row['facility']),
+    physician: optStr(row['physician']),
+    findings: optStr(row['findings']),
+    conclusions: optStr(row['conclusions']),
+    source: optStr(row['source']),
+    ...mapProvenance(row),
+  } as AbdominalReport;
 }
 
 function mapRowToTreatmentTrial(row: Record<string, unknown>): TreatmentTrial {
@@ -1526,6 +2219,29 @@ function mapRowToHypothesis(row: Record<string, unknown>): ResearchHypothesis {
     validationStatus: optStr(row['validation_status']) as ResearchHypothesis['validationStatus'],
     sourceCredibility: optNum(row['source_credibility']),
   };
+}
+
+function mapRowToBrainPattern(row: Record<string, unknown>): BrainPattern {
+  const base = {
+    id: String(row['id']),
+    pattern: String(row['pattern']),
+    category: String(row['category']) as BrainPattern['category'],
+    phenotypeCluster: JSON.parse(String(row['phenotype_cluster'] ?? '[]')) as string[],
+    supportingCases: Number(row['supporting_cases'] ?? 0),
+    confidence: Number(row['confidence'] ?? 0.5),
+    sourceCaseLabels: JSON.parse(String(row['source_case_labels'] ?? '[]')) as string[],
+    createdAt: String(row['created_at']),
+    updatedAt: String(row['updated_at']),
+  };
+
+  const result: BrainPattern = { ...base };
+  if (row['related_diagnoses']) {
+    result.relatedDiagnoses = JSON.parse(String(row['related_diagnoses'])) as string[];
+  }
+  if (row['related_genes']) {
+    result.relatedGenes = JSON.parse(String(row['related_genes'])) as string[];
+  }
+  return result;
 }
 
 function mapRowToEvidenceLink(row: Record<string, unknown>): HypothesisEvidenceLink {

@@ -1,5 +1,6 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
+import { normalizeSpecialty } from '../importers/specialty-normalizer.js';
 import type { EvidenceTier, ValidationStatus } from '../schemas/clinical-record.js';
 import { evidenceProvenanceFields } from '../schemas/clinical-record.js';
 import {
@@ -408,6 +409,13 @@ async function handlePatientReport(
   store: ClinicalStore,
   input: z.infer<typeof patientReportData>,
 ): Promise<CaptureResult> {
+  // Dedup guard: skip if identical report already exists
+  const existing = await store.findPatientReport(input.patientId, input.reportType, input.content);
+  if (existing) {
+    logger.debug(`captureData(patient-report): SKIP duplicate for ${input.patientId}`);
+    return { success: true, id: existing };
+  }
+
   const id = generateId('pro');
   logger.debug(`captureData(patient-report): ${input.reportType} for ${input.patientId}`);
 
@@ -419,6 +427,7 @@ async function handlePatientReport(
     content: string;
     severity?: number;
     extractedInsights?: string[];
+    source?: string;
   } = {
     id,
     patientId: input.patientId,
@@ -428,6 +437,7 @@ async function handlePatientReport(
   };
   if (input.severity !== undefined) report.severity = input.severity;
   if (input.extractedInsights) report.extractedInsights = input.extractedInsights;
+  report.source = 'agent-captured';
   applyProvenance(report as Record<string, unknown>, input);
 
   await store.addPatientReport(report);
@@ -438,6 +448,13 @@ async function handleAgentLearning(
   store: ClinicalStore,
   input: z.infer<typeof agentLearningData>,
 ): Promise<CaptureResult> {
+  // Dedup guard: skip if identical learning already exists
+  const existing = await store.findAgentLearning(input.patientId, input.category, input.content);
+  if (existing) {
+    logger.debug(`captureData(agent-learning): SKIP duplicate for ${input.patientId}`);
+    return { success: true, id: existing };
+  }
+
   const id = generateId('learn');
   logger.debug(`captureData(agent-learning): ${input.category} for ${input.patientId}`);
 
@@ -449,6 +466,7 @@ async function handleAgentLearning(
     content: string;
     confidence?: number;
     relatedHypotheses?: string[];
+    source?: string;
   } = {
     id,
     patientId: input.patientId,
@@ -458,6 +476,7 @@ async function handleAgentLearning(
   };
   if (input.confidence !== undefined) learning.confidence = input.confidence;
   if (input.relatedHypotheses) learning.relatedHypotheses = input.relatedHypotheses;
+  learning.source = 'agent-captured';
   applyProvenance(learning as Record<string, unknown>, input);
 
   await store.addAgentLearning(learning);
@@ -468,6 +487,13 @@ async function handleContradiction(
   store: ClinicalStore,
   input: z.infer<typeof contradictionData>,
 ): Promise<CaptureResult> {
+  // Dedup guard: skip if identical contradiction already exists
+  const existing = await store.findContradiction(input.patientId, input.finding1, input.finding2);
+  if (existing) {
+    logger.debug(`captureData(contradiction): SKIP duplicate for ${input.patientId}`);
+    return { success: true, id: existing };
+  }
+
   const id = generateId('contra');
   logger.debug(`captureData(contradiction) for ${input.patientId}`);
 
@@ -483,6 +509,7 @@ async function handleContradiction(
     resolutionStatus: 'unresolved' | 'pending' | 'resolved';
     resolutionPlan?: string;
     diagnosticImpact?: string;
+    source?: string;
   } = {
     id,
     patientId: input.patientId,
@@ -496,6 +523,7 @@ async function handleContradiction(
   if (input.finding2Method) contradiction.finding2Method = input.finding2Method;
   if (input.resolutionPlan) contradiction.resolutionPlan = input.resolutionPlan;
   if (input.diagnosticImpact) contradiction.diagnosticImpact = input.diagnosticImpact;
+  contradiction.source = 'agent-captured';
   applyProvenance(contradiction as Record<string, unknown>, input);
 
   await store.addContradiction(contradiction);
@@ -542,6 +570,17 @@ async function handleTreatmentTrial(
   store: ClinicalStore,
   input: z.infer<typeof treatmentTrialData>,
 ): Promise<CaptureResult> {
+  // Dedup guard: skip if identical treatment already exists
+  const existing = await store.findTreatmentTrial(
+    input.patientId,
+    input.medication,
+    input.startDate ?? null,
+  );
+  if (existing) {
+    logger.debug(`captureData(treatment-trial): SKIP duplicate for ${input.patientId}`);
+    return { success: true, id: existing };
+  }
+
   const id = generateId('trial');
   logger.debug(`captureData(treatment-trial): ${input.medication} for ${input.patientId}`);
 
@@ -558,6 +597,7 @@ async function handleTreatmentTrial(
     sideEffects?: string[];
     reasonDiscontinued?: string;
     adequateTrial?: boolean;
+    source?: string;
   } = { id, patientId: input.patientId, medication: input.medication, efficacy: input.efficacy };
   if (input.drugClass) trial.drugClass = input.drugClass;
   if (input.indication) trial.indication = input.indication;
@@ -567,6 +607,7 @@ async function handleTreatmentTrial(
   if (input.sideEffects) trial.sideEffects = input.sideEffects;
   if (input.reasonDiscontinued) trial.reasonDiscontinued = input.reasonDiscontinued;
   if (input.adequateTrial !== undefined) trial.adequateTrial = input.adequateTrial;
+  trial.source = 'agent-captured';
   applyProvenance(trial as Record<string, unknown>, input);
 
   await store.addTreatmentTrial(trial);
@@ -577,6 +618,18 @@ async function handleConsultation(
   store: ClinicalStore,
   input: z.infer<typeof consultationData>,
 ): Promise<CaptureResult> {
+  // Dedup guard: skip if identical consultation already exists
+  const existing = await store.findConsultation(
+    input.patientId,
+    input.specialty,
+    input.date,
+    input.provider,
+  );
+  if (existing) {
+    logger.debug(`captureData(consultation): SKIP duplicate for ${input.patientId}`);
+    return { success: true, id: existing };
+  }
+
   const id = generateId('consult');
   logger.debug(
     `captureData(consultation): ${input.provider} (${input.specialty}) for ${input.patientId}`,
@@ -594,11 +647,12 @@ async function handleConsultation(
     conclusions?: string;
     conclusionsStatus: 'documented' | 'unknown' | 'pending';
     recommendations?: string[];
+    source?: string;
   } = {
     id,
     patientId: input.patientId,
     provider: input.provider,
-    specialty: input.specialty,
+    specialty: normalizeSpecialty(input.specialty),
     date: input.date,
     conclusionsStatus: input.conclusionsStatus,
   };
@@ -607,6 +661,7 @@ async function handleConsultation(
   if (input.findings) consultation.findings = input.findings;
   if (input.conclusions) consultation.conclusions = input.conclusions;
   if (input.recommendations) consultation.recommendations = input.recommendations;
+  consultation.source = 'agent-captured';
   applyProvenance(consultation as Record<string, unknown>, input);
 
   await store.addConsultation(consultation);
