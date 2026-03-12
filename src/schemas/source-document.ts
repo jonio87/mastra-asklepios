@@ -12,16 +12,16 @@ import { evidenceProvenanceFields } from './clinical-record.js';
  * "How many imaging reports do we have?" becomes SQL instead of file counting.
  */
 
-// ─── Document Categories (from medical-records repo) ────────────────────
+// ─── Document Categories (FHIR R4-aligned, from medical-records repo) ───
 
 export const sourceDocCategoryValues = [
-  'lab_result',
-  'consultation',
-  'imaging_report',
-  'abdominal',
-  'narrative',
-  'external',
-  'other',
+  'lab_result', // FHIR DiagnosticReport, LOINC 26436-6, HL7 LAB
+  'consultation', // FHIR DocumentReference, LOINC 11488-4
+  'imaging_report', // FHIR DiagnosticReport, LOINC 18748-4, HL7 RAD
+  'procedure', // FHIR Procedure, LOINC 28570-0 (was: abdominal)
+  'narrative', // FHIR DocumentReference, LOINC 51855-5
+  'external', // FHIR DocumentReference, LOINC 11488-4
+  'other', // Non-medical
 ] as const;
 
 export const sourceDocCategoryEnum = z.enum(sourceDocCategoryValues);
@@ -71,6 +71,10 @@ export const sourceDocumentSchema = z.object({
   physician: z.string().optional(), // 'Lek. Paweł Szewczyk'
   language: z.string().optional(), // 'pl', 'en', 'de'
   tags: z.array(z.string()).optional(),
+  // FHIR R4 + LOINC Document Ontology alignment
+  fhirResourceType: z.enum(['DiagnosticReport', 'Procedure', 'DocumentReference']).optional(),
+  loincDocCode: z.string().optional(), // LOINC Document Ontology code (e.g., "26436-6")
+  diagnosticServiceSection: z.enum(['LAB', 'RAD', 'GE', 'NRS', 'OTH']).optional(), // HL7 v2-0074
   // Evidence provenance
   ...evidenceProvenanceFields,
 });

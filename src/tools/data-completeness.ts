@@ -32,7 +32,7 @@ export const dataCompletenessTool = createTool({
       diagnoses: z.number(),
       progressions: z.number(),
       treatmentTrials: z.number(),
-      abdominalReports: z.number(),
+      procedureReports: z.number(),
     }),
     layer5: z.object({
       reportVersions: z.number(),
@@ -77,7 +77,7 @@ export const dataCompletenessTool = createTool({
     const diagnoses = await store.queryDiagnoses({ patientId: pid });
     const progressions = await store.queryProgressions({ patientId: pid });
     const treatments = await store.queryTreatments({ patientId: pid });
-    const abdominal = await store.getAbdominalReports(pid);
+    const procedures = await store.getAbdominalReports(pid);
 
     // Identify imaging reports without structured findings
     const reportsWithFindings = new Set(imgFindings.map((f) => f.imagingReportId));
@@ -161,7 +161,7 @@ export const dataCompletenessTool = createTool({
         diagnoses: diagnoses.length,
         progressions: progressions.length,
         treatmentTrials: treatments.length,
-        abdominalReports: abdominal.length,
+        procedureReports: procedures.length,
       },
       layer5: {
         reportVersions: reportVersions.length,

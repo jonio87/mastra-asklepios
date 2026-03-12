@@ -9,7 +9,7 @@ function makeFrontmatter(
     document_id: 'con-mayo-cardio-001',
     document_type: 'consultation',
     patient_id: 'tomasz-szychliński',
-    asklepios_type: 'consultation-letter',
+    asklepios_type: 'clinical-note',
     evidence_tier: 'T1-specialist',
     validation_status: 'confirmed',
     source_credibility: 98,

@@ -4,7 +4,7 @@
  * Phase 0:   Validate all files (fail-early — no DB writes until everything passes)
  * Phase 0.5: Layer 0 — Source Documents (extraction metadata, provenance tracking)
  * Phase 1:   Layer 3 — Document Knowledge Base (semantic search via embeddings)
- * Phase 2:   Layer 2 — Structured Records (labs, consultations, imaging, abdominal, narratives)
+ * Phase 2:   Layer 2 — Structured Records (labs, consultations, imaging, procedures, narratives)
  *
  * Usage:
  *   npx tsx scripts/import-records.ts <records-dir> [options]
@@ -26,7 +26,7 @@ import { discoverRecordFiles, parseRecordFile, stripFrontmatter } from '../src/i
 import { normalizeLabValue } from '../src/importers/normalizer.js';
 import { mapConsultation } from '../src/importers/consultation-parser.js';
 import { mapImagingReport } from '../src/importers/imaging-parser.js';
-import { mapAbdominalReport } from '../src/importers/abdominal-parser.js';
+import { mapProcedureReport } from '../src/importers/procedure-parser.js';
 import { documentTypeMapping } from '../src/importers/schemas.js';
 import { getClinicalStore } from '../src/storage/clinical-store.js';
 import { getProvenanceStore } from '../src/storage/provenance-store.js';
@@ -553,25 +553,25 @@ async function importImagingReports(
   return result;
 }
 
-// ─── Phase 2d: Layer 2 — Structured Abdominal Reports ───────────────────
+// ─── Phase 2d: Layer 2 — Structured Procedure Reports (FHIR Procedure) ──
 
-interface AbdominalImportResult {
+interface ProcedureImportResult {
   imported: number;
   skipped: number;
 }
 
-async function importAbdominalReports(
+async function importProcedureReports(
   records: ParsedRecord[],
   verbose: boolean,
-): Promise<AbdominalImportResult> {
+): Promise<ProcedureImportResult> {
   const store = getClinicalStore();
-  const result: AbdominalImportResult = { imported: 0, skipped: 0 };
+  const result: ProcedureImportResult = { imported: 0, skipped: 0 };
 
-  const abdominalRecords = records.filter(
-    (r) => r.frontmatter.document_type === 'abdominal',
+  const procedureRecords = records.filter(
+    (r) => r.frontmatter.document_type === 'procedure',
   );
 
-  for (const record of abdominalRecords) {
+  for (const record of procedureRecords) {
     const rawContent = await readFile(record.filePath, 'utf-8');
     const bodyText = stripFrontmatter(rawContent);
 
@@ -581,7 +581,7 @@ async function importAbdominalReports(
       continue;
     }
 
-    const report = mapAbdominalReport(record.frontmatter, bodyText);
+    const report = mapProcedureReport(record.frontmatter, bodyText);
 
     // Skip non-clinical entries (photos, attachments)
     const NON_CLINICAL = new Set(['other']);
@@ -596,7 +596,7 @@ async function importAbdominalReports(
 
     if (verbose) {
       console.log(
-        `  L2A ${record.frontmatter.document_id} → ${report.procedureType}`,
+        `  L2P ${record.frontmatter.document_id} → ${report.procedureType}`,
       );
     }
   }
@@ -792,11 +792,11 @@ async function main(): Promise<void> {
     imagingResult = await importImagingReports(validation.valid, opts.verbose);
   }
 
-  // ── Phase 2d: Layer 2 — Abdominal Reports ──────────────────────────────
-  let abdominalResult: AbdominalImportResult | undefined;
+  // ── Phase 2d: Layer 2 — Procedure Reports (FHIR Procedure) ─────────────
+  let procedureResult: ProcedureImportResult | undefined;
   if (!opts.layer3Only) {
-    console.log('\nPhase 2d: Layer 2 — Structured Abdominal Reports...');
-    abdominalResult = await importAbdominalReports(validation.valid, opts.verbose);
+    console.log('\nPhase 2d: Layer 2 — Structured Procedure Reports...');
+    procedureResult = await importProcedureReports(validation.valid, opts.verbose);
   }
 
   // ── Phase 2e: Layer 2 — Narratives + External ──────────────────────────
@@ -831,8 +831,8 @@ async function main(): Promise<void> {
     console.log(`  Layer 2 (Imaging):        ${imagingResult.imported} imported, ${imagingResult.skipped} skipped`);
   }
 
-  if (abdominalResult) {
-    console.log(`  Layer 2 (Abdominal):      ${abdominalResult.imported} imported, ${abdominalResult.skipped} skipped`);
+  if (procedureResult) {
+    console.log(`  Layer 2 (Procedures):     ${procedureResult.imported} imported, ${procedureResult.skipped} skipped`);
   }
 
   if (narrativeResult) {

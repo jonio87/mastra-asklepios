@@ -9,7 +9,7 @@ function makeFrontmatter(
     document_id: 'img-20120720-mri-001',
     document_type: 'imaging_report',
     patient_id: 'tomasz-szychliński',
-    asklepios_type: 'imaging-report',
+    asklepios_type: 'diagnostic-report',
     evidence_tier: 'T1-official',
     validation_status: 'confirmed',
     source_credibility: 95,

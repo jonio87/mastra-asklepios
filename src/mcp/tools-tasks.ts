@@ -158,15 +158,15 @@ export function registerTaskTools(server: McpServer): void {
           .describe('Clinical document text (required for patient-intake)'),
         documentType: z
           .enum([
-            'medical-record',
-            'lab-report',
-            'genetic-report',
+            'diagnostic-report',
+            'procedure-note',
             'clinical-note',
-            'referral',
-            'unknown',
+            'patient-document',
+            'research-paper',
+            'other',
           ])
           .optional()
-          .describe('Document type (for patient-intake)'),
+          .describe('FHIR R4-aligned document type (for patient-intake)'),
         symptoms: z.array(z.string()).optional().describe('Symptom list (for diagnostic-research)'),
         hpoTerms: z.array(z.string()).optional().describe('HPO term IDs (for diagnostic-research)'),
         researchFocus: z

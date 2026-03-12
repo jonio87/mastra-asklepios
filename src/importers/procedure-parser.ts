@@ -1,6 +1,9 @@
 /**
- * Parse abdominal report markdown files from medical-records extraction into
+ * Parse procedure report markdown files from medical-records extraction into
  * AbdominalReport objects suitable for import to clinical_abdominal_reports table.
+ *
+ * FHIR R4: Maps to Procedure resource (LOINC 28570-0 Procedure Note).
+ * HL7 v2-0074: Primarily GE (Gastroenterology) or OTH (Other diagnostic).
  *
  * Maps YAML frontmatter → AbdominalReport schema:
  *   category/source_file → procedureType (gastroscopy, colonoscopy, pH-metry, SIBO, ultrasound, etc.)
@@ -86,18 +89,21 @@ function extractPhysicianFromBody(body: string): string | undefined {
 
 // ─── Main parser ────────────────────────────────────────────────────────
 
-export function buildAbdominalId(documentId: string): string {
-  return `import-abd-${documentId}`;
+export function buildProcedureId(documentId: string): string {
+  return `import-proc-${documentId}`;
 }
 
-export function mapAbdominalReport(frontmatter: RecordFrontmatter, body: string): AbdominalReport {
+/** @deprecated Use buildProcedureId — kept for backward compatibility */
+export const buildAbdominalId = buildProcedureId;
+
+export function mapProcedureReport(frontmatter: RecordFrontmatter, body: string): AbdominalReport {
   const fm = frontmatter as RecordFrontmatter & Record<string, unknown>;
 
   const sourceFile = typeof fm.source_file === 'string' ? fm.source_file : '';
   const category = typeof fm.category === 'string' ? fm.category : '';
 
   const report: AbdominalReport = {
-    id: buildAbdominalId(fm.document_id),
+    id: buildProcedureId(fm.document_id),
     patientId: fm.patient_id,
     procedureType: extractProcedureType(sourceFile, category),
     date: fm.date ?? 'unknown',
@@ -126,3 +132,6 @@ export function mapAbdominalReport(frontmatter: RecordFrontmatter, body: string)
 
   return report;
 }
+
+/** @deprecated Use mapProcedureReport — kept for backward compatibility */
+export const mapAbdominalReport = mapProcedureReport;

@@ -18,12 +18,23 @@ import { logger } from '../utils/logger.js';
  * - consultation-letter: markdown chunking (by specialist)
  */
 
+/**
+ * FHIR R4-aligned document types for Layer 3 ingestion.
+ *
+ * Mapping to FHIR resources:
+ *   diagnostic-report → DiagnosticReport (labs, imaging, pathology)
+ *   procedure-note    → Procedure (gastroscopy, colonoscopy, SIBO)
+ *   clinical-note     → DocumentReference (consultations, progress notes)
+ *   patient-document  → DocumentReference (patient-authored narratives)
+ *   research-paper    → external literature (not FHIR-mapped)
+ *   other             → non-medical
+ */
 export type DocumentType =
+  | 'diagnostic-report'
+  | 'procedure-note'
   | 'clinical-note'
-  | 'lab-report'
-  | 'imaging-report'
+  | 'patient-document'
   | 'research-paper'
-  | 'consultation-letter'
   | 'other';
 
 export interface DocumentMetadata {
@@ -208,13 +219,13 @@ async function chunkByType(
   documentType: DocumentType,
 ): Promise<Array<{ text: string; metadata?: Record<string, unknown> }>> {
   switch (documentType) {
-    case 'clinical-note':
-    case 'consultation-letter':
-      await doc.chunkMarkdown({ maxSize: 1000, overlap: 100 });
-      break;
-    case 'lab-report':
-    case 'imaging-report':
+    case 'diagnostic-report':
       await doc.chunkRecursive({ maxSize: 500, overlap: 50 });
+      break;
+    case 'procedure-note':
+    case 'clinical-note':
+    case 'patient-document':
+      await doc.chunkMarkdown({ maxSize: 1000, overlap: 100 });
       break;
     case 'research-paper':
       await doc.chunkRecursive({ maxSize: 1500, overlap: 200 });
