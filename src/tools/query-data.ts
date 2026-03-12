@@ -1,6 +1,12 @@
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import type { EvidenceTier, ValidationStatus } from '../schemas/clinical-record.js';
+import { chromosomeEnum } from '../schemas/genetic-variant.js';
+import {
+  certaintyLevelEnum,
+  evidenceLevelEnum,
+  externalIdTypeEnum,
+} from '../schemas/research-record.js';
 import type { ClinicalStore } from '../storage/clinical-store.js';
 import { getClinicalStore } from '../storage/clinical-store.js';
 import { logger } from '../utils/logger.js';
@@ -40,15 +46,23 @@ interface LabQueryInput {
   testName?: string | undefined;
   dateFrom?: string | undefined;
   dateTo?: string | undefined;
+  flag?: string | undefined;
 }
 
 function buildLabQuery(input: LabQueryInput) {
-  const query: { patientId: string; testName?: string; dateFrom?: string; dateTo?: string } = {
+  const query: {
+    patientId: string;
+    testName?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    flag?: string;
+  } = {
     patientId: input.patientId,
   };
   if (input.testName) query.testName = input.testName;
   if (input.dateFrom) query.dateFrom = input.dateFrom;
   if (input.dateTo) query.dateTo = input.dateTo;
+  if (input.flag) query.flag = input.flag;
   return query;
 }
 
@@ -243,10 +257,16 @@ function computeExhaustedClasses(
 const labsQuery = z.object({
   type: z.literal('labs'),
   patientId: z.string().describe('Patient resource ID'),
-  testName: z.string().optional().describe('Filter by test name (e.g., "WBC", "CRP")'),
+  testName: z
+    .string()
+    .optional()
+    .describe(
+      'Filter by test name. Exact match by default. Use % for LIKE search (e.g., "%WBC%" matches "WBC", "WBC (urine dipstick)")',
+    ),
   dateFrom: z.string().optional().describe('Start date (ISO 8601)'),
   dateTo: z.string().optional().describe('End date (ISO 8601)'),
   computeTrend: z.boolean().optional().describe('Compute trend analysis if testName provided'),
+  flag: z.string().optional().describe('Filter by flag status (LOW, HIGH, normal, CRITICAL)'),
 });
 
 const treatmentsQuery = z.object({
@@ -281,6 +301,79 @@ const patientHistoryQuery = z.object({
     .describe('Only include data from the last N days (default: 90)'),
 });
 
+// ─── Research query schemas (Layer 2B) ──────────────────────────────
+
+const findingsQuery = z.object({
+  type: z.literal('findings'),
+  patientId: z.string().describe('Patient resource ID'),
+  source: z.string().optional().describe('Filter by source (e.g., "PubMed", "ClinicalTrials.gov")'),
+  externalIdType: externalIdTypeEnum
+    .optional()
+    .describe('Filter by external ID type (pmid, nct, gene, etc.)'),
+  evidenceLevel: evidenceLevelEnum.optional().describe('Filter by evidence level'),
+  dateFrom: z.string().optional().describe('Start date (ISO 8601)'),
+  dateTo: z.string().optional().describe('End date (ISO 8601)'),
+  queryId: z.string().optional().describe('Filter by research query ID'),
+});
+
+const researchQueriesQuery = z.object({
+  type: z.literal('research-queries'),
+  patientId: z.string().describe('Patient resource ID'),
+  toolUsed: z
+    .string()
+    .optional()
+    .describe('Filter by tool (e.g., "deepResearch", "biomcp_article_searcher")'),
+  agent: z.string().optional().describe('Filter by agent (e.g., "research-agent")'),
+  stage: z.number().int().min(0).max(9).optional().describe('Filter by diagnostic flow stage'),
+  dateFrom: z.string().optional().describe('Start date (ISO 8601)'),
+  dateTo: z.string().optional().describe('End date (ISO 8601)'),
+});
+
+const hypothesesQuery = z.object({
+  type: z.literal('hypotheses'),
+  patientId: z.string().describe('Patient resource ID'),
+  name: z.string().optional().describe('Filter by hypothesis name (LIKE search)'),
+  certaintyLevel: certaintyLevelEnum.optional().describe('Filter by certainty level'),
+  latestOnly: z
+    .boolean()
+    .optional()
+    .describe('Only return latest non-superseded versions (default: true)'),
+  withEvidence: z.boolean().optional().describe('Include linked evidence for each hypothesis'),
+});
+
+const hypothesisTimelineQuery = z.object({
+  type: z.literal('hypothesis-timeline'),
+  patientId: z.string().describe('Patient resource ID'),
+  name: z.string().describe('Exact hypothesis name to trace through version history'),
+});
+
+const researchSummaryQuery = z.object({
+  type: z.literal('research-summary'),
+  patientId: z.string().describe('Patient resource ID'),
+});
+
+// ─── Genetic variant query schema (Layer 2C) ─────────────────────────
+
+const geneticVariantsQuery = z.object({
+  type: z.literal('genetic-variants'),
+  patientId: z.string().describe('Patient resource ID'),
+  chromosome: chromosomeEnum.optional().describe('Filter by chromosome (1-22, X, Y, MT)'),
+  rsid: z.string().optional().describe('Filter by single rsid (e.g., "rs1800497")'),
+  rsids: z
+    .array(z.string())
+    .optional()
+    .describe('Batch lookup by multiple rsids (e.g., ["rs1800497", "rs4680"])'),
+  positionFrom: z.number().int().optional().describe('Filter by position range (start)'),
+  positionTo: z.number().int().optional().describe('Filter by position range (end)'),
+  genotype: z.string().optional().describe('Filter by specific genotype (e.g., "AG", "TT")'),
+  excludeNoCalls: z
+    .boolean()
+    .optional()
+    .describe('Exclude no-call variants ("--" genotype, default: false)'),
+  limit: z.number().int().positive().optional().describe('Max results (default: 100)'),
+  offset: z.number().int().nonnegative().optional().describe('Pagination offset (default: 0)'),
+});
+
 /**
  * Keep the discriminated union for runtime parsing — it gives precise per-type validation.
  * But Anthropic's API rejects `oneOf` at the top level of tool `input_schema`,
@@ -292,21 +385,54 @@ const queryDataUnion = z.discriminatedUnion('type', [
   consultationsQuery,
   contradictionsQuery,
   patientHistoryQuery,
+  findingsQuery,
+  researchQueriesQuery,
+  hypothesesQuery,
+  hypothesisTimelineQuery,
+  researchSummaryQuery,
+  geneticVariantsQuery,
 ]);
 
 const queryDataInputSchema = z.object({
   type: z
-    .enum(['labs', 'treatments', 'consultations', 'contradictions', 'patient-history'])
-    .describe('Type of clinical data to query'),
+    .enum([
+      'labs',
+      'treatments',
+      'consultations',
+      'contradictions',
+      'patient-history',
+      'findings',
+      'research-queries',
+      'hypotheses',
+      'hypothesis-timeline',
+      'research-summary',
+      'genetic-variants',
+    ])
+    .describe('Type of clinical/research data to query'),
   patientId: z.string().describe('Patient resource ID'),
   // labs-specific fields
-  testName: z.string().optional().describe('(labs) Filter by test name (e.g., "WBC", "CRP")'),
-  dateFrom: z.string().optional().describe('(labs) Start date (ISO 8601)'),
-  dateTo: z.string().optional().describe('(labs) End date (ISO 8601)'),
+  testName: z
+    .string()
+    .optional()
+    .describe(
+      '(labs) Filter by test name. Exact match by default; use % for LIKE search (e.g., "%WBC%")',
+    ),
+  dateFrom: z
+    .string()
+    .optional()
+    .describe('Start date (ISO 8601) — used by labs, findings, research-queries'),
+  dateTo: z
+    .string()
+    .optional()
+    .describe('End date (ISO 8601) — used by labs, findings, research-queries'),
   computeTrend: z
     .boolean()
     .optional()
     .describe('(labs) Compute trend analysis if testName provided'),
+  flag: z
+    .string()
+    .optional()
+    .describe('(labs) Filter by flag status (LOW, HIGH, normal, CRITICAL)'),
   // treatments-specific fields
   drugClass: z.string().optional().describe('(treatments) Filter by drug class (e.g., "CGRP mAb")'),
   efficacy: z.string().optional().describe('(treatments) Filter by efficacy'),
@@ -323,6 +449,63 @@ const queryDataInputSchema = z.object({
     .number()
     .optional()
     .describe('(patient-history) Only include data from the last N days (default: 90)'),
+  // findings-specific fields
+  source: z
+    .string()
+    .optional()
+    .describe('(findings) Filter by source (e.g., "PubMed", "ClinicalTrials.gov")'),
+  externalIdType: externalIdTypeEnum.optional().describe('(findings) Filter by external ID type'),
+  evidenceLevel: evidenceLevelEnum.optional().describe('(findings) Filter by evidence level'),
+  queryId: z.string().optional().describe('(findings) Filter by research query ID'),
+  // research-queries-specific fields
+  toolUsed: z.string().optional().describe('(research-queries) Filter by tool used'),
+  agent: z.string().optional().describe('(research-queries) Filter by agent'),
+  stage: z
+    .number()
+    .int()
+    .min(0)
+    .max(9)
+    .optional()
+    .describe('(research-queries) Filter by diagnostic flow stage'),
+  // hypotheses-specific fields
+  name: z.string().optional().describe('(hypotheses) Filter by hypothesis name (LIKE search)'),
+  certaintyLevel: certaintyLevelEnum.optional().describe('(hypotheses) Filter by certainty level'),
+  latestOnly: z
+    .boolean()
+    .optional()
+    .describe('(hypotheses) Only return latest non-superseded versions (default: true)'),
+  withEvidence: z
+    .boolean()
+    .optional()
+    .describe('(hypotheses) Include linked evidence for each hypothesis'),
+  // genetic-variants-specific fields
+  chromosome: chromosomeEnum
+    .optional()
+    .describe('(genetic-variants) Filter by chromosome (1-22, X, Y, MT)'),
+  rsid: z.string().optional().describe('(genetic-variants) Filter by single rsid'),
+  rsids: z
+    .array(z.string())
+    .optional()
+    .describe('(genetic-variants) Batch lookup by multiple rsids'),
+  positionFrom: z
+    .number()
+    .int()
+    .optional()
+    .describe('(genetic-variants) Filter by position range start'),
+  positionTo: z
+    .number()
+    .int()
+    .optional()
+    .describe('(genetic-variants) Filter by position range end'),
+  genotype: z.string().optional().describe('(genetic-variants) Filter by specific genotype'),
+  excludeNoCalls: z.boolean().optional().describe('(genetic-variants) Exclude no-call variants'),
+  limit: z.number().int().positive().optional().describe('(genetic-variants) Max results'),
+  offset: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe('(genetic-variants) Pagination offset'),
 });
 
 // ─── Handler functions (one per query type) ──────────────────────────
@@ -451,16 +634,162 @@ async function handlePatientHistoryQuery(
   };
 }
 
+// ─── Research query handlers (Layer 2B) ──────────────────────────────
+
+async function handleFindingsQuery(
+  store: ClinicalStore,
+  input: z.infer<typeof findingsQuery>,
+): Promise<{ data: unknown }> {
+  logger.debug(`queryData(findings) for ${input.patientId}`);
+  const query: {
+    patientId: string;
+    source?: string;
+    externalIdType?: string;
+    evidenceLevel?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    queryId?: string;
+  } = { patientId: input.patientId };
+  if (input.source) query.source = input.source;
+  if (input.externalIdType) query.externalIdType = input.externalIdType;
+  if (input.evidenceLevel) query.evidenceLevel = input.evidenceLevel;
+  if (input.dateFrom) query.dateFrom = input.dateFrom;
+  if (input.dateTo) query.dateTo = input.dateTo;
+  if (input.queryId) query.queryId = input.queryId;
+
+  const findings = await store.queryFindings(query);
+  return { data: { findings, count: findings.length } };
+}
+
+async function handleResearchQueriesQuery(
+  store: ClinicalStore,
+  input: z.infer<typeof researchQueriesQuery>,
+): Promise<{ data: unknown }> {
+  logger.debug(`queryData(research-queries) for ${input.patientId}`);
+  const query: {
+    patientId: string;
+    toolUsed?: string;
+    agent?: string;
+    stage?: number;
+    dateFrom?: string;
+    dateTo?: string;
+  } = { patientId: input.patientId };
+  if (input.toolUsed) query.toolUsed = input.toolUsed;
+  if (input.agent) query.agent = input.agent;
+  if (input.stage !== undefined) query.stage = input.stage;
+  if (input.dateFrom) query.dateFrom = input.dateFrom;
+  if (input.dateTo) query.dateTo = input.dateTo;
+
+  const queries = await store.queryResearchQueries(query);
+  return { data: { queries, count: queries.length } };
+}
+
+async function handleHypothesesQuery(
+  store: ClinicalStore,
+  input: z.infer<typeof hypothesesQuery>,
+): Promise<{ data: unknown }> {
+  logger.debug(`queryData(hypotheses) for ${input.patientId}`);
+  const query: {
+    patientId: string;
+    name?: string;
+    certaintyLevel?: string;
+    latestOnly?: boolean;
+  } = { patientId: input.patientId };
+  if (input.name) query.name = input.name;
+  if (input.certaintyLevel) query.certaintyLevel = input.certaintyLevel;
+  if (input.latestOnly !== undefined) query.latestOnly = input.latestOnly;
+
+  const hypotheses = await store.queryHypotheses(query);
+
+  if (input.withEvidence) {
+    const withEvidence = await Promise.all(
+      hypotheses.map(async (h) => {
+        const result = await store.getHypothesisWithEvidence(h.id);
+        return { ...h, evidenceLinks: result?.links ?? [] };
+      }),
+    );
+    return { data: { hypotheses: withEvidence, count: withEvidence.length } };
+  }
+
+  return { data: { hypotheses, count: hypotheses.length } };
+}
+
+async function handleHypothesisTimelineQuery(
+  store: ClinicalStore,
+  input: z.infer<typeof hypothesisTimelineQuery>,
+): Promise<{ data: unknown }> {
+  logger.debug(`queryData(hypothesis-timeline) for ${input.patientId}, name=${input.name}`);
+  const timeline = await store.getHypothesisTimeline({
+    patientId: input.patientId,
+    name: input.name,
+  });
+  return { data: timeline };
+}
+
+async function handleResearchSummaryQuery(
+  store: ClinicalStore,
+  input: z.infer<typeof researchSummaryQuery>,
+): Promise<{ data: unknown }> {
+  logger.debug(`queryData(research-summary) for ${input.patientId}`);
+  const summary = await store.getPatientResearchSummary(input.patientId);
+  return { data: summary };
+}
+
+// ─── Genetic variant query handler (Layer 2C) ────────────────────────
+
+async function handleGeneticVariantsQuery(
+  store: ClinicalStore,
+  input: z.infer<typeof geneticVariantsQuery>,
+): Promise<{ data: unknown }> {
+  logger.debug(
+    `queryData(genetic-variants) for ${input.patientId}, chr=${input.chromosome ?? 'all'}`,
+  );
+  const variants = await store.queryGeneticVariants({
+    patientId: input.patientId,
+    chromosome: input.chromosome,
+    rsid: input.rsid,
+    rsids: input.rsids,
+    positionFrom: input.positionFrom,
+    positionTo: input.positionTo,
+    genotype: input.genotype,
+    excludeNoCalls: input.excludeNoCalls,
+    limit: input.limit,
+    offset: input.offset,
+  });
+  const total = await store.countGeneticVariants(input.patientId);
+
+  return {
+    data: {
+      variants: variants.map((v) => ({
+        rsid: v.rsid,
+        chromosome: v.chromosome,
+        position: v.position,
+        genotype: v.genotype,
+        source: v.source,
+        referenceGenome: v.referenceGenome,
+      })),
+      count: variants.length,
+      totalForPatient: total,
+    },
+  };
+}
+
 // ─── Tool definition ─────────────────────────────────────────────────
 
 export const queryDataTool = createTool({
   id: 'query-data',
-  description: `Query structured clinical data from the patient record. Use the "type" field:
+  description: `Query structured clinical or research data from the patient record. Use the "type" field:
 - "labs": Lab results with optional trend analysis (filter by testName, dateRange)
 - "treatments": Treatment trials with efficacy and exhausted drug classes
 - "consultations": Specialist visits with conclusions status
 - "contradictions": Conflicting findings with resolution status
-- "patient-history": Composite view (recent PROs + learnings + labs + unresolved contradictions)`,
+- "patient-history": Composite view (recent PROs + learnings + labs + unresolved contradictions)
+- "findings": Research findings (PMIDs, trials, genes) with filters (source, externalIdType, evidenceLevel)
+- "research-queries": Research query audit trail (filter by tool, agent, stage)
+- "hypotheses": Diagnostic hypotheses with optional evidence links (filter by name, certaintyLevel)
+- "hypothesis-timeline": Full version chain for a hypothesis — confidence evolution, direction changes, triggering evidence
+- "research-summary": Aggregate research statistics (finding count, query count, hypothesis count, top sources)
+- "genetic-variants": Raw genotype data (23andMe SNPs) — filter by chromosome, rsid, position range, genotype`,
   inputSchema: queryDataInputSchema,
   outputSchema: z.object({
     data: z.unknown().describe('Query results — shape depends on type'),
@@ -481,6 +810,18 @@ export const queryDataTool = createTool({
         return handleContradictionsQuery(store, parsed);
       case 'patient-history':
         return handlePatientHistoryQuery(store, parsed);
+      case 'findings':
+        return handleFindingsQuery(store, parsed);
+      case 'research-queries':
+        return handleResearchQueriesQuery(store, parsed);
+      case 'hypotheses':
+        return handleHypothesesQuery(store, parsed);
+      case 'hypothesis-timeline':
+        return handleHypothesisTimelineQuery(store, parsed);
+      case 'research-summary':
+        return handleResearchSummaryQuery(store, parsed);
+      case 'genetic-variants':
+        return handleGeneticVariantsQuery(store, parsed);
     }
   },
 });

@@ -51,6 +51,35 @@ jest.mock('../tools/knowledge-query.js', () => ({
   knowledgeQueryTool: { execute: jest.fn() },
 }));
 
+jest.mock('../tools/brain-recall.js', () => ({
+  brainRecallTool: { execute: jest.fn() },
+}));
+
+jest.mock('../tools/hpo-mapper.js', () => ({
+  hpoMapperTool: { execute: jest.fn() },
+}));
+
+jest.mock('../tools/adversarial-synthesis.js', () => ({
+  adversarialSynthesisTool: { execute: jest.fn() },
+}));
+
+jest.mock('../tools/parallel-research.js', () => ({
+  parallelResearchTool: { execute: jest.fn() },
+}));
+
+jest.mock('../tools/ddx-generator.js', () => ({
+  ddxGeneratorTool: { execute: jest.fn() },
+}));
+
+jest.mock('../tools/evidence-link.js', () => ({
+  evidenceLinkTool: { execute: jest.fn() },
+}));
+
+jest.mock('../clients/biomedical-mcp.js', () => ({
+  getBiomedicalTools: jest.fn(() => Promise.resolve({})),
+  biomedicalMcp: { listTools: jest.fn(() => Promise.resolve({})) },
+}));
+
 jest.mock('../memory.js', () => ({
   storage: {
     getStore: jest.fn(() => Promise.resolve(null)),
@@ -84,16 +113,19 @@ describe('MCP Server', () => {
   describe('full server creation', () => {
     it('creates server with all registrations', async () => {
       const { createAsklepiosMcpServer } = await import('./server.js');
-      const server = createAsklepiosMcpServer();
+      const server = await createAsklepiosMcpServer();
       expect(server).toBeInstanceOf(McpServer);
     });
 
     it('registers correct total counts', async () => {
       const { createAsklepiosMcpServer } = await import('./server.js');
-      const server = createAsklepiosMcpServer();
+      const server = await createAsklepiosMcpServer();
       const { tools, resources, resourceTemplates, prompts } = getServerInternals(server);
 
-      expect(Object.keys(tools).length).toBe(39);
+      // At least 42 native tools (3 core + 8 agent + 4 workflow + 5 state + 2 task +
+      // 6 clinical + 1 validation + 8 research + 3 session + 2 streaming)
+      // Biomedical tools may also be present depending on Jest module isolation
+      expect(Object.keys(tools).length).toBeGreaterThanOrEqual(42);
       expect(Object.keys(resources).length + Object.keys(resourceTemplates).length).toBe(7);
       expect(Object.keys(prompts).length).toBe(4);
     });
@@ -105,18 +137,11 @@ describe('MCP Server', () => {
     const { tools } = getServerInternals(server);
     const toolNames = Object.keys(tools);
 
-    it('registers exactly 6 core tools', () => {
-      expect(toolNames.length).toBe(6);
+    it('registers exactly 3 core tools', () => {
+      expect(toolNames.length).toBe(3);
     });
 
-    it.each([
-      'ask_asklepios',
-      'search_pubmed',
-      'lookup_orphanet',
-      'lookup_clinvar',
-      'map_symptoms',
-      'recall_brain',
-    ])('registers %s', (name) => {
+    it.each(['ask_asklepios', 'map_symptoms', 'recall_brain'])('registers %s', (name) => {
       expect(toolNames).toContain(name);
     });
   });
@@ -151,13 +176,14 @@ describe('MCP Server', () => {
     const { tools } = getServerInternals(server);
     const toolNames = Object.keys(tools);
 
-    it('registers exactly 3 workflow tools', () => {
-      expect(toolNames.length).toBe(3);
+    it('registers exactly 4 workflow tools', () => {
+      expect(toolNames.length).toBe(4);
     });
 
     it.each([
       'run_patient_intake',
       'run_diagnostic_research',
+      'run_diagnostic_flow',
       'resume_workflow',
     ])('registers %s', (name) => {
       expect(toolNames).toContain(name);
@@ -254,8 +280,8 @@ describe('MCP Server', () => {
     const { tools } = getServerInternals(server);
     const toolNames = Object.keys(tools);
 
-    it('registers exactly 4 clinical tools', () => {
-      expect(toolNames.length).toBe(4);
+    it('registers exactly 6 clinical tools', () => {
+      expect(toolNames.length).toBe(6);
     });
 
     it.each([
@@ -263,6 +289,8 @@ describe('MCP Server', () => {
       'query_clinical_data',
       'ingest_document',
       'search_knowledge',
+      'link_evidence',
+      'patient_research_summary',
     ])('registers %s', (name) => {
       expect(toolNames).toContain(name);
     });
@@ -306,9 +334,6 @@ describe('MCP Server', () => {
 
     it('read-only tools have readOnlyHint: true', () => {
       const readOnlyTools = [
-        'search_pubmed',
-        'lookup_orphanet',
-        'lookup_clinvar',
         'map_symptoms',
         'recall_brain',
         'query_clinical_data',

@@ -43,13 +43,13 @@ describe('reportAgent', () => {
     expect(tools).toHaveProperty('brainFeed');
   });
 
-  it('has exactly 3 tools configured', () => {
+  it('has exactly 4 tools configured', () => {
     const tools = reportAgent.listTools();
-    expect(Object.keys(tools)).toHaveLength(3);
+    expect(Object.keys(tools)).toHaveLength(4);
   });
 
-  it('does not have knowledgeQuery tool', () => {
+  it('has knowledgeQuery tool', () => {
     const tools = reportAgent.listTools();
-    expect(tools).not.toHaveProperty('knowledgeQuery');
+    expect(tools).toHaveProperty('knowledgeQuery');
   });
 });

@@ -595,7 +595,7 @@ Intelligent step limit scaling via `resolveMaxSteps(message)` (`src/utils/max-st
 ## Testing
 
 ### Unit Tests
-- **500+ tests** across 50+ passing test suites
+- **662 tests** across 57 passing test suites
 - Colocated test files (`*.test.ts` / `*.test.tsx` next to source)
 - Coverage: tools (schema validation + execution for all 17 tools), agents (config verification + network configuration + dynamic maxSteps), workflows (schema + structure + HITL suspend/resume schemas), processors (input/output behavior), CLI (command parsing + session management + network toggle + cli-core event types), MCP server (registration tests for all 37+ tools, 7 resources, 4 prompts + task-based tools), utils (model router, logger, usage tracker, observability, NCBI rate limiter, maxSteps resolver), Phase 9 tools (clinical-trials 9 tests, openfda 8 tests, evidence-search 8 tests, ddx-generator 8 tests, pubmed-search 24 tests), TUI components (Header rendering, MessageBubble role-based styling, token display)
 
@@ -627,6 +627,9 @@ Patient persona: Maria Kowalski (32F, 8-year diagnostic odyssey, vascular EDS, a
 | OpenFDA | bupropion + leukopenia | **194 FAERS reports** (confirms real adverse event signal) |
 | ClinicalTrials.gov | ketamine + chronic headache | Found **NCT04814381** (KETALGIA, RECRUITING) |
 | ClinicalTrials.gov | LDN + chronic pain | Found completed LDN and naltrexone trials |
+| BioMCP gene enrichment | COMT,MTHFR,VDR,CBS,ACE,BHMT | Convergence on **homocysteine metabolism** (p=3.3e-6), sulfur amino acid pathways |
+| BioMCP disease trials | craniovertebral junction anomaly | Found **NCT00795080** (Dynamic MRI, U of Michigan, enrolling) |
+| BioMCP drug adverse-events | naltrexone | **40,791 total FAERS reports** (hospitalization, mood, GI) |
 
 ---
 
@@ -637,7 +640,31 @@ Configured in `.mcp.json`:
 | Server | Command | Purpose |
 |--------|---------|---------|
 | `asklepios` | `node dist/mcp/stdio.js` | Asklepios MCP server (37+ tools, 7 resources, 4 prompts) |
-| `biomcp` | `uvx biomcp run` | BioMCP — biological databases: drug adverse events, gene pathways, variant annotations, trial matching [Phase 9] |
+| `biomcp` | `uvx biomcp-cli mcp` | BioMCP v0.8.11 — 15 biomedical APIs via single `shell` tool (see below) |
+
+### BioMCP Integration (Phase 9)
+
+**Package**: `biomcp-cli` (Rust binary, installed via `uvx biomcp-cli`)
+**MCP interface**: Single `shell` tool accepting CLI commands as string
+**APIs**: PubMed, ClinicalTrials.gov, ClinVar, gnomAD, OncoKB, Reactome, UniProt, PharmGKB, CPIC, OpenFDA, Monarch Initiative, GWAS Catalog, GTEx, DGIdb, ClinGen
+**Env**: Optional `NCBI_API_KEY` passed through `.mcp.json` for higher rate limits
+
+Key commands for Asklepios:
+
+| Command | Purpose | Example |
+|---------|---------|---------|
+| `get gene <symbol>` | Gene summary, OMIM, UniProt links | `get gene COMT` |
+| `gene pathways <symbol>` | Reactome pathway mapping | `gene pathways MTHFR` |
+| `enrich <GENE1,GENE2,...>` | Gene-set enrichment (g:Profiler) | `enrich COMT,MTHFR,VDR,CBS` |
+| `search article -g <gene> -k <keyword>` | Gene + keyword literature | `search article -g COMT -k "pain sensitivity"` |
+| `disease trials <name>` | Disease → trial search | `disease trials "basilar invagination"` |
+| `drug adverse-events <name>` | Drug → FAERS adverse events | `drug adverse-events naltrexone` |
+| `search phenotype "HP:... HP:..."` | HPO-based disease matching | `search phenotype "HP:0000238 HP:0002650"` |
+| `skill <name>` | Guided investigation workflows | `skill rare-disease`, `skill pharmacogenomics` |
+
+14 built-in skills: variant-to-treatment, drug-investigation, trial-searching, rare-disease, drug-shortages, advanced-therapies, hereditary-cancer, resistance, gene-function-lookup, gene-set-analysis, literature-synthesis, pharmacogenomics, phenotype-triage, protein-pathway.
+
+**Validation results** (2026-03-08): 15/16 APIs healthy (OpenFDA transient 500). Gene-set enrichment of patient SNP panel (COMT, MTHFR, VDR, CBS, ACE, BHMT) identified convergence on homocysteine metabolic process (p=3.3e-6), sulfur amino acid biosynthesis (p=6.4e-6), and methionine/folate cycle pathways (p=2.4e-4).
 
 ---
 
@@ -647,7 +674,7 @@ Configured in `.mcp.json`:
 |-----|--------|------------|
 | ~~`ddxGeneratorTool` not wired to any agent~~ | ~~DDx only available via MCP~~ | **Fixed** — wired to hypothesis-agent |
 | ClinVar lacks `rsId` input field | Cannot search by dbSNP rsID (e.g., rs1801133 for MTHFR C677T) | Use `gene` + `variant` fields as workaround |
-| BioMCP untested | Configured in `.mcp.json` but never verified working | Run `uvx biomcp run` to verify |
+| ~~BioMCP untested~~ | ~~Configured but never verified~~ | **Fixed** — v0.8.11 verified, 15/16 APIs healthy, `.mcp.json` corrected to `biomcp-cli mcp` |
 
 ---
 

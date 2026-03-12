@@ -241,10 +241,12 @@ const TEST_NAME_CANONICAL: Record<string, string> = {
 
   // ── Metabolic panel ──
   glucose: 'Glucose',
+  'glucose, s': 'Glucose',
   'glucose (fasting)': 'Glucose (fasting)',
   glukoza: 'Glucose',
 
   creatinine: 'Creatinine',
+  'creatinine, s': 'Creatinine',
   kreatynina: 'Creatinine',
 
   urea: 'Urea',
@@ -256,12 +258,17 @@ const TEST_NAME_CANONICAL: Record<string, string> = {
   'kwas moczowy': 'Uric acid',
 
   sodium: 'Sodium',
+  'sodium, s': 'Sodium',
+  'sodium, serum': 'Sodium',
   sód: 'Sodium',
 
   potassium: 'Potassium',
+  'potassium, s': 'Potassium',
+  'potassium, serum': 'Potassium',
   potas: 'Potassium',
 
   magnesium: 'Magnesium',
+  'magnesium, s': 'Magnesium',
   magnez: 'Magnesium',
   'magnez (mg)': 'Magnesium',
 
@@ -297,7 +304,9 @@ const TEST_NAME_CANONICAL: Record<string, string> = {
   alt: 'ALT',
   'alt (alanine aminotransferase)': 'ALT',
   'alanine aminotransferase': 'ALT',
+  'alanine aminotransferase (alt), s': 'ALT',
   ast: 'AST',
+  'aspartate aminotransferase (ast), s': 'AST',
   'ast (aspartate aminotransferase)': 'AST',
   'aspartate aminotransferase': 'AST',
   ggt: 'GGT',
@@ -306,10 +315,12 @@ const TEST_NAME_CANONICAL: Record<string, string> = {
   'gamma-glutamyltransferase': 'GGT',
   'gamma-gt': 'GGT',
   'alkaline phosphatase': 'Alkaline phosphatase',
+  'alkaline phosphatase, s': 'Alkaline phosphatase',
   'alp (alkaline phosphatase)': 'Alkaline phosphatase',
   'fosfataza zasadowa': 'Alkaline phosphatase',
   'fosfataza zasadowa (alp)': 'Alkaline phosphatase',
   'total bilirubin': 'Total bilirubin',
+  'bilirubin, total, s': 'Total bilirubin',
   'bilirubina całkowita': 'Total bilirubin',
   bilirubina: 'Total bilirubin',
   ldh: 'LDH',
@@ -317,8 +328,41 @@ const TEST_NAME_CANONICAL: Record<string, string> = {
   lipase: 'Lipase',
   amylase: 'Amylase',
 
+  // ── Mayo Clinic CMP / misc suffixed names ──
+  'albumin, s': 'Albumin',
+  globulin: 'Globulin',
+  'a/g ratio': 'Albumin/Globulin ratio',
+  'anion gap': 'Anion gap',
+  bicarbonate: 'Bicarbonate',
+  'bicarbonate, s': 'Bicarbonate',
+  'co2, total': 'Bicarbonate',
+  'bun (blood urea nitrogen), s': 'Urea',
+  'blood urea nitrogen': 'Urea',
+  'calcium, total, s': 'Total calcium',
+  'chloride, s': 'Chloride',
+  chloride: 'Chloride',
+  chlorki: 'Chloride',
+  phosphorus: 'Phosphorus',
+  phosphate: 'Phosphorus',
+  fosfor: 'Phosphorus',
+  'creatine kinase (ck), s': 'CK',
+  ck: 'CK',
+  'dehydroepiandrosterone sulfate': 'DHEA-S',
+  'dehydroepiandrosterone sulfate, s': 'DHEA-S',
+  'dhea-s': 'DHEA-S',
+  'dhea-so4': 'DHEA-S',
+  'glucose, p': 'Glucose',
+  'hemoglobin a1c': 'HbA1c',
+  'hemoglobin a1c, b': 'HbA1c',
+  'osmolality, u': 'Osmolality (urine)',
+  osmolality: 'Osmolality',
+  'sedimentation rate': 'ESR',
+  'sedimentation rate, b': 'ESR',
+  'rbc distrib width': 'RDW-CV',
+
   // ── Protein ──
   'total protein': 'Total protein',
+  'protein, total, s': 'Total protein',
   'total protein concentration': 'Total protein',
   'białko całkowite': 'Total protein',
 
@@ -331,6 +375,7 @@ const TEST_NAME_CANONICAL: Record<string, string> = {
   // ── Thyroid ──
   tsh: 'TSH',
   'tsh (thyroid stimulating hormone)': 'TSH',
+  'tsh, sensitive': 'TSH',
   'thyroid stimulating hormone': 'TSH',
 
   ft3: 'FT3',
@@ -359,6 +404,7 @@ const TEST_NAME_CANONICAL: Record<string, string> = {
   'lh (luteinizing hormone)': 'LH',
   'sex hormone-binding globulin': 'SHBG',
   cortisol: 'Cortisol',
+  'cortisol, random': 'Cortisol',
 
   // ── Vitamins & minerals ──
   '25-oh vitamin d3': 'Vitamin D 25-OH',
@@ -369,12 +415,18 @@ const TEST_NAME_CANONICAL: Record<string, string> = {
   'wit. d3 metabolit 25(oh)': 'Vitamin D 25-OH',
 
   '25-hydroxy vitamin d3': 'Vitamin D 25-OH',
+  '25-hydroxy vitamin d2': 'Vitamin D2 25-OH',
+  '25-hydroxy vitamin d total': 'Vitamin D Total 25-OH',
+  '25-hydroxyvitamin d2 and d3': 'Vitamin D Total 25-OH',
 
   'vitamin b12': 'Vitamin B12',
   'vitamin b12 (cobalamin)': 'Vitamin B12',
+  'vitamin b12 assay': 'Vitamin B12',
+  'vitamin b12 assay, s': 'Vitamin B12',
   'witamina b12': 'Vitamin B12',
 
   ferritin: 'Ferritin',
+  'ferritin, s': 'Ferritin',
   ferrytyna: 'Ferritin',
 
   homocysteine: 'Homocysteine',
@@ -429,6 +481,8 @@ const TEST_NAME_CANONICAL: Record<string, string> = {
   'anti-pr3 igg (anca) by elisa': 'Anti-PR3 (ANCA)',
   'anti-mpo (panca)': 'Anti-MPO (pANCA)',
   'anti-ccp (anti-cyclic citrullinated peptide)': 'Anti-CCP',
+  'anti-ccp (cyclic citrullinated peptide)': 'Anti-CCP',
+  'antinuclear antibodies (ana)': 'ANA (IIF screen)',
   'ana (antinuclear antibodies) — iif screen': 'ANA (IIF screen)',
   'ana iif titer/pattern': 'ANA IIF titer/pattern',
   'ana1 screen (iif on hep-2 cells)': 'ANA (IIF screen)',
@@ -437,11 +491,17 @@ const TEST_NAME_CANONICAL: Record<string, string> = {
   // ── Immunoglobulins ──
   iga: 'IgA',
   'immunoglobulin a': 'IgA',
+  'immunoglobulin a (iga)': 'IgA',
+  'immunoglobulin a (iga), s': 'IgA',
   'total iga': 'IgA',
   igg: 'IgG',
   'immunoglobulin g': 'IgG',
+  'immunoglobulin g (igg)': 'IgG',
+  'immunoglobulin g (igg), s': 'IgG',
   igm: 'IgM',
   'immunoglobulin m': 'IgM',
+  'immunoglobulin m (igm)': 'IgM',
+  'immunoglobulin m (igm), s': 'IgM',
 
   // ── Electrophoresis ──
   'alfa-1-globuliny': 'Alpha-1 globulins',
@@ -533,11 +593,20 @@ const TEST_NAME_CANONICAL: Record<string, string> = {
   'hepatitis a — igg — immunity search': 'Hepatitis A IgG',
   'hbsag (hepatitis b surface antigen)': 'HBsAg',
   'hbsag — hepatitis b surface antigen': 'HBsAg',
+  'hbsag screen': 'HBsAg',
+  'hbs antigen scrn': 'HBsAg',
+  'hbs antigen screen': 'HBsAg',
   'anti-hbs (hepatitis b surface antibody)': 'Anti-HBs',
+  'hbs antibody screen': 'Anti-HBs',
+  'hbs antibody scrn': 'Anti-HBs',
+  'hbs antibody quantitative': 'Anti-HBs (quantitative)',
   'anti-hbc (total hepatitis b core antibodies)': 'Anti-HBc total',
   'anti-hcv (hepatitis c antibodies)': 'Anti-HCV',
   'anti-hcv (hepatitis c antibody)': 'Anti-HCV',
   'anti-hcv antibodies': 'Anti-HCV',
+  'hcv antibody screen': 'Anti-HCV',
+  'hcv ab screen': 'Anti-HCV',
+  'hcv ab scrn': 'Anti-HCV',
   'anti-hav total (hepatitis a)': 'Anti-HAV total',
   'anti-hav igm': 'Anti-HAV IgM',
   'przeciwciała anty hbc całkowite (hbv)': 'Anti-HBc total',
@@ -576,6 +645,7 @@ const TEST_NAME_CANONICAL: Record<string, string> = {
 
   // ── Celiac / GI autoantibodies ──
   'tissue transglutaminase iga (ttg iga)': 'tTG IgA',
+  'tissue transglutaminase ab iga': 'tTG IgA',
   'tissue transglutaminase igg (ttg igg)': 'tTG IgG',
   'p/c. p. endomysium (ema) iga': 'Anti-endomysial IgA',
   'p/c. p. endomysium (ema) igg': 'Anti-endomysial IgG',
@@ -588,7 +658,9 @@ const TEST_NAME_CANONICAL: Record<string, string> = {
 
   // ── Urinalysis ──
   ph: 'pH (urine)',
+  'ph, u': 'pH (urine)',
   'specific gravity': 'Specific gravity (urine)',
+  'specific gravity, u': 'Specific gravity (urine)',
   'ciężar właściwy': 'Specific gravity (urine)',
   protein: 'Protein (urine)',
   ketones: 'Ketones (urine)',
@@ -635,10 +707,19 @@ const TEST_NAME_CANONICAL: Record<string, string> = {
   'cmv igm jakościowo': 'CMV IgM (qualitative)',
   'cmv igm (ilościowo)': 'CMV IgM (quantitative)',
 
-  // ── Cardiac ──
+  // ── Cardiac / ECG ──
   'n-terminal pro-b-type natriuretic peptide': 'NT-proBNP',
   'sflt-1 (soluble fms-like tyrosine kinase-1)': 'sFlt-1',
   'lipoprotein(a)': 'Lipoprotein(a)',
+  'ventricular rate': 'Ventricular rate (ECG)',
+  'pr interval': 'PR interval (ECG)',
+  'qrs duration': 'QRS duration (ECG)',
+  'qrsd interval': 'QRS duration (ECG)',
+  'qt interval': 'QT interval (ECG)',
+  'qtc interval': 'QTc interval (ECG)',
+  'p axis': 'P axis (ECG)',
+  'r axis': 'R axis (ECG)',
+  't wave axis': 'T wave axis (ECG)',
 
   // ── HLA ──
   'hla dq2.5': 'HLA-DQ2.5',
@@ -676,7 +757,6 @@ const TEST_NAME_CANONICAL: Record<string, string> = {
   'anti-ampa receptor (glur1/glur2)': 'Anti-AMPA receptor',
   'anti-gad (glutamic acid decarboxylase)': 'Anti-GAD',
   'anti-ma2/ta': 'Anti-Ma2/Ta',
-  'creatine kinase': 'Creatine kinase',
   'beta-2-microglobulin': 'Beta-2 microglobulin',
   ceruloplasmin: 'Ceruloplasmin',
   'coenzyme q10': 'Coenzyme Q10',
@@ -709,8 +789,21 @@ const TEST_NAME_CANONICAL: Record<string, string> = {
 
   // ── Urinalysis (additional) ──
   clarity: 'Clarity (urine)',
+  'urine clarity': 'Clarity (urine)',
   color: 'Color (urine)',
+  'urine color': 'Color (urine)',
   bilirubin: 'Bilirubin (urine)',
+  'hemoglobin (urine dipstick)': 'Hemoglobin (urine dipstick)',
+  'leukocyte esterase (urine)': 'Leukocyte esterase (urine)',
+  'nitrite (urine)': 'Nitrite (urine)',
+  'ketone (urine)': 'Ketone (urine)',
+  'glucose (urine)': 'Glucose (urine)',
+  'microscopy (urine)': 'Microscopy (urine)',
+  'rbc (urine)': 'RBC (urine)',
+  'wbc (urine)': 'WBC (urine)',
+  'protein (urine)': 'Protein (urine)',
+  'protein/osmolality (urine)': 'Protein/Osmolality (urine)',
+  'predicted 24h protein': 'Predicted 24h protein (urine)',
   'erythrocytes/hemoglobin': 'Erythrocytes/Hb (urine)',
   'd-dimer': 'D-dimer',
 

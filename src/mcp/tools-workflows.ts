@@ -92,13 +92,55 @@ export function registerWorkflowTools(server: McpServer): void {
   );
 
   server.registerTool(
+    'run_diagnostic_flow',
+    {
+      description:
+        'Execute the full 9-stage diagnostic flow. Stages: 1) Records ingestion check [HARD GATE], 2+3) Brain recall + structured interview, 4) Parallel research, 5) Preliminary hypotheses, 6) Follow-up questions with routing, 7) Adversarial synthesis [HITL], 8) Specialist integration [HITL], 9) Three-register deliverables. Suspends at stages 7 and 8 for human review. Returns runId for resume.',
+      inputSchema: {
+        patientId: z.string().describe('Patient ID'),
+        mode: z
+          .enum(['full', 'from-stage'])
+          .optional()
+          .describe('Run full flow or resume from a specific stage (default: full)'),
+        startStage: z
+          .number()
+          .min(1)
+          .max(9)
+          .optional()
+          .describe('Stage to start from (only when mode="from-stage")'),
+        context: z
+          .string()
+          .optional()
+          .describe('Additional clinical context for the diagnostic flow'),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    },
+    async ({ patientId, mode, startStage, context }) => {
+      const workflow = mastra.getWorkflow('diagnostic-flow');
+      const run = await workflow.createRun();
+      const result = await run.start({
+        inputData: { patientId, mode, startStage, context },
+      });
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify({ runId: run.runId, ...result }, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
     'resume_workflow',
     {
       description:
-        'Resume a suspended workflow with human review data. Use after run_patient_intake or run_diagnostic_research returns a suspended status. Provide the workflow ID, run ID, step to resume from, and the review data as a JSON string.',
+        'Resume a suspended workflow with human review data. Use after run_patient_intake, run_diagnostic_research, or run_diagnostic_flow returns a suspended status. Provide the workflow ID, run ID, step to resume from, and the review data as a JSON string.',
       inputSchema: {
         workflowId: z
-          .enum(['patient-intake', 'diagnostic-research'])
+          .enum(['patient-intake', 'diagnostic-research', 'diagnostic-flow'])
           .describe('Which workflow to resume'),
         runId: z.string().describe('Run ID returned from the original workflow execution'),
         stepId: z

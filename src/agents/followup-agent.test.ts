@@ -17,10 +17,10 @@ describe('followupAgent', () => {
     expect(followupAgent.getDescription()).toContain('hypothesis gaps');
   });
 
-  it('has instructions about question format', async () => {
+  it('has instructions about question output format', async () => {
     const instructions = await followupAgent.getInstructions();
-    expect(instructions).toContain('Question Format');
-    expect(instructions).toContain('Purpose');
+    expect(instructions).toContain('Question Output Format');
+    expect(instructions).toContain('PURPOSE');
   });
 
   it('has instructions about answer routing logic', async () => {
@@ -36,13 +36,13 @@ describe('followupAgent', () => {
     expect(tools).toHaveProperty('captureData');
   });
 
-  it('has exactly 2 tools configured', () => {
+  it('has exactly 3 tools configured', () => {
     const tools = followupAgent.listTools();
-    expect(Object.keys(tools)).toHaveLength(2);
+    expect(Object.keys(tools)).toHaveLength(3);
   });
 
-  it('does not have knowledgeQuery tool', () => {
+  it('has knowledgeQuery tool', () => {
     const tools = followupAgent.listTools();
-    expect(tools).not.toHaveProperty('knowledgeQuery');
+    expect(tools).toHaveProperty('knowledgeQuery');
   });
 });

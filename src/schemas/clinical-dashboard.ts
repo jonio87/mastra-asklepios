@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { flowStateSchema } from './diagnostic-synthesis.js';
 
 /**
  * Clinical Dashboard Schema — the compact working memory for each patient.
@@ -79,6 +80,11 @@ export const clinicalDashboardSchema = z.object({
     .optional(),
 
   lastUpdated: z.string().optional(),
+
+  flowState: flowStateSchema.optional(),
+  // 9-stage diagnostic flow progress tracking.
+  // Populated when running the structured diagnostic workflow.
+  // Null/undefined during ad-hoc agent interactions.
 });
 
 export type ClinicalDashboard = z.infer<typeof clinicalDashboardSchema>;

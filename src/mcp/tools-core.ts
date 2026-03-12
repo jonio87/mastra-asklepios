@@ -2,10 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { mastra } from '../mastra.js';
 import { brainRecallTool } from '../tools/brain-recall.js';
-import { clinvarLookupTool } from '../tools/clinvar-lookup.js';
 import { hpoMapperTool } from '../tools/hpo-mapper.js';
-import { orphanetLookupTool } from '../tools/orphanet-lookup.js';
-import { pubmedSearchTool } from '../tools/pubmed-search.js';
 import { resolveMaxSteps } from '../utils/max-steps.js';
 
 /**
@@ -55,151 +52,8 @@ export function registerCoreTools(server: McpServer): void {
     },
   );
 
-  server.registerTool(
-    'search_pubmed',
-    {
-      description:
-        'Search PubMed for medical research articles. Supports keyword search, PMID verification, batch PMID lookup, and cited-by queries. Returns full abstracts, MeSH terms, and publication types.',
-      inputSchema: {
-        query: z
-          .string()
-          .optional()
-          .describe('Search query for PubMed (e.g., "Ehlers-Danlos joint hypermobility")'),
-        pmid: z.string().optional().describe('Single PMID to verify and retrieve full details'),
-        pmids: z.array(z.string()).optional().describe('Multiple PMIDs to look up in batch'),
-        citedByPmid: z.string().optional().describe('Find articles that cite this PMID'),
-        maxResults: z
-          .number()
-          .min(1)
-          .max(50)
-          .optional()
-          .describe('Maximum number of results (default: 10)'),
-      },
-      annotations: { readOnlyHint: true, destructiveHint: false },
-    },
-    async ({ query, pmid, pmids, citedByPmid, maxResults }) => {
-      if (!pubmedSearchTool.execute) {
-        return {
-          content: [{ type: 'text' as const, text: 'PubMed search tool not available' }],
-          isError: true,
-        };
-      }
-      const result = await pubmedSearchTool.execute(
-        {
-          ...(query !== undefined ? { query } : {}),
-          ...(pmid !== undefined ? { pmid } : {}),
-          ...(pmids !== undefined ? { pmids } : {}),
-          ...(citedByPmid !== undefined ? { citedByPmid } : {}),
-          maxResults: maxResults ?? 10,
-        },
-        { mastra },
-      );
-
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'lookup_orphanet',
-    {
-      description:
-        'Look up rare diseases in the Orphanet database. Search by name/keyword, or look up directly by ORPHAcode for detailed disease information including genes, inheritance mode, prevalence, and synonyms.',
-      inputSchema: {
-        query: z.string().describe('Disease name or keyword to search in Orphanet'),
-        orphaCode: z
-          .number()
-          .optional()
-          .describe('Specific ORPHAcode for direct lookup (bypasses text search)'),
-        maxResults: z
-          .number()
-          .min(1)
-          .max(20)
-          .optional()
-          .describe('Maximum number of search results (default: 5)'),
-      },
-      annotations: { readOnlyHint: true, destructiveHint: false },
-    },
-    async ({ query, orphaCode, maxResults }) => {
-      if (!orphanetLookupTool.execute) {
-        return {
-          content: [{ type: 'text' as const, text: 'Orphanet lookup tool not available' }],
-          isError: true,
-        };
-      }
-      const result = await orphanetLookupTool.execute(
-        { query, orphaCode, maxResults: maxResults ?? 5 },
-        { mastra },
-      );
-
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    },
-  );
-
-  server.registerTool(
-    'lookup_clinvar',
-    {
-      description:
-        'Look up genetic variant pathogenicity in ClinVar. Search by gene symbol, HGVS variant notation, or free text to get clinical significance, review status, and associated conditions.',
-      inputSchema: {
-        query: z.string().optional().describe('Free text search query (e.g., "Ehlers-Danlos")'),
-        gene: z
-          .string()
-          .optional()
-          .describe('Gene symbol for field-specific search (e.g., "COL3A1")'),
-        variant: z
-          .string()
-          .optional()
-          .describe('HGVS notation for variant-specific search (e.g., "c.1854+1G>A")'),
-        maxResults: z
-          .number()
-          .min(1)
-          .max(50)
-          .optional()
-          .describe('Maximum number of results to return (default: 10)'),
-      },
-      annotations: { readOnlyHint: true, destructiveHint: false },
-    },
-    async ({ query, gene, variant, maxResults }) => {
-      if (!clinvarLookupTool.execute) {
-        return {
-          content: [{ type: 'text' as const, text: 'ClinVar lookup tool not available' }],
-          isError: true,
-        };
-      }
-      const result = await clinvarLookupTool.execute(
-        {
-          ...(query !== undefined ? { query } : {}),
-          ...(gene !== undefined ? { gene } : {}),
-          ...(variant !== undefined ? { variant } : {}),
-          maxResults: maxResults ?? 10,
-        },
-        { mastra },
-      );
-
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-      };
-    },
-  );
+  // search_pubmed, lookup_orphanet, lookup_clinvar removed — now proxied from upstream
+  // biomedical MCP servers via tools-biomedical.ts (biomcp_article_searcher, etc.)
 
   server.registerTool(
     'map_symptoms',

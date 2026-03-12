@@ -22,6 +22,9 @@ import type { ParsedRecord } from '../src/importers/parser.js';
 import type { RecordFrontmatter, StructuredLabValue } from '../src/importers/schemas.js';
 import { discoverRecordFiles, parseRecordFile, stripFrontmatter } from '../src/importers/parser.js';
 import { normalizeLabValue } from '../src/importers/normalizer.js';
+import { mapConsultation } from '../src/importers/consultation-parser.js';
+import { mapImagingReport } from '../src/importers/imaging-parser.js';
+import { mapAbdominalReport } from '../src/importers/abdominal-parser.js';
 import { documentTypeMapping } from '../src/importers/schemas.js';
 import { getClinicalStore } from '../src/storage/clinical-store.js';
 import { getDocumentStore } from '../src/knowledge/document-store.js';
@@ -282,6 +285,236 @@ async function importLayer2(
   return result;
 }
 
+// ─── Phase 2b: Layer 2 — Structured Consultations ────────────────────────
+
+interface ConsultationImportResult {
+  imported: number;
+  skipped: number;
+}
+
+async function importConsultations(
+  records: ParsedRecord[],
+  verbose: boolean,
+): Promise<ConsultationImportResult> {
+  const store = getClinicalStore();
+  const result: ConsultationImportResult = { imported: 0, skipped: 0 };
+
+  const consultationRecords = records.filter(
+    (r) => r.frontmatter.document_type === 'consultation',
+  );
+
+  for (const record of consultationRecords) {
+    const rawContent = await readFile(record.filePath, 'utf-8');
+    const bodyText = stripFrontmatter(rawContent);
+
+    if (bodyText.trim().length === 0) {
+      if (verbose) console.log(`  SKIP ${record.frontmatter.document_id} (empty body)`);
+      result.skipped++;
+      continue;
+    }
+
+    const consultation = mapConsultation(record.frontmatter, bodyText);
+    await store.addConsultation(consultation);
+    result.imported++;
+
+    if (verbose) {
+      console.log(
+        `  L2C ${record.frontmatter.document_id} → ${consultation.specialty} (${consultation.provider})`,
+      );
+    }
+  }
+
+  return result;
+}
+
+// ─── Phase 2c: Layer 2 — Structured Imaging Reports ──────────────────────
+
+interface ImagingImportResult {
+  imported: number;
+  skipped: number;
+}
+
+async function importImagingReports(
+  records: ParsedRecord[],
+  verbose: boolean,
+): Promise<ImagingImportResult> {
+  const store = getClinicalStore();
+  const result: ImagingImportResult = { imported: 0, skipped: 0 };
+
+  const imagingRecords = records.filter(
+    (r) => r.frontmatter.document_type === 'imaging_report',
+  );
+
+  for (const record of imagingRecords) {
+    const rawContent = await readFile(record.filePath, 'utf-8');
+    const bodyText = stripFrontmatter(rawContent);
+
+    if (bodyText.trim().length === 0) {
+      if (verbose) console.log(`  SKIP ${record.frontmatter.document_id} (empty body)`);
+      result.skipped++;
+      continue;
+    }
+
+    // Skip non-medical documents (e.g., DICOM viewer docs)
+    const fm = record.frontmatter as RecordFrontmatter & Record<string, unknown>;
+    if (fm['category'] === 'software-documentation' || fm.document_type === 'other') {
+      if (verbose) console.log(`  SKIP ${record.frontmatter.document_id} (non-medical)`);
+      result.skipped++;
+      continue;
+    }
+
+    const report = mapImagingReport(record.frontmatter, bodyText);
+    await store.addImagingReport(report);
+    result.imported++;
+
+    if (verbose) {
+      console.log(
+        `  L2I ${record.frontmatter.document_id} → ${report.modality} ${report.bodyRegion}`,
+      );
+    }
+  }
+
+  return result;
+}
+
+// ─── Phase 2d: Layer 2 — Structured Abdominal Reports ───────────────────
+
+interface AbdominalImportResult {
+  imported: number;
+  skipped: number;
+}
+
+async function importAbdominalReports(
+  records: ParsedRecord[],
+  verbose: boolean,
+): Promise<AbdominalImportResult> {
+  const store = getClinicalStore();
+  const result: AbdominalImportResult = { imported: 0, skipped: 0 };
+
+  const abdominalRecords = records.filter(
+    (r) => r.frontmatter.document_type === 'abdominal',
+  );
+
+  for (const record of abdominalRecords) {
+    const rawContent = await readFile(record.filePath, 'utf-8');
+    const bodyText = stripFrontmatter(rawContent);
+
+    if (bodyText.trim().length === 0) {
+      if (verbose) console.log(`  SKIP ${record.frontmatter.document_id} (empty body)`);
+      result.skipped++;
+      continue;
+    }
+
+    const report = mapAbdominalReport(record.frontmatter, bodyText);
+
+    // Skip non-clinical entries (photos, attachments)
+    const NON_CLINICAL = new Set(['other']);
+    if (NON_CLINICAL.has(report.procedureType) && /Zdjęcia|attachments|photos/i.test(report.source ?? '')) {
+      if (verbose) console.log(`  SKIP ${record.frontmatter.document_id} (non-clinical: ${report.source})`);
+      result.skipped++;
+      continue;
+    }
+
+    await store.addAbdominalReport(report);
+    result.imported++;
+
+    if (verbose) {
+      console.log(
+        `  L2A ${record.frontmatter.document_id} → ${report.procedureType}`,
+      );
+    }
+  }
+
+  return result;
+}
+
+// ─── Phase 2e: Layer 2 — Narrative + External as Patient Reports ─────────
+
+interface NarrativeImportResult {
+  imported: number;
+  skipped: number;
+}
+
+async function importNarrativesAndExternals(
+  records: ParsedRecord[],
+  verbose: boolean,
+): Promise<NarrativeImportResult> {
+  const store = getClinicalStore();
+  const result: NarrativeImportResult = { imported: 0, skipped: 0 };
+
+  // Narratives → patient_reports with type 'self-observation'
+  const narrativeRecords = records.filter(
+    (r) => r.frontmatter.document_type === 'narrative',
+  );
+
+  for (const record of narrativeRecords) {
+    const rawContent = await readFile(record.filePath, 'utf-8');
+    const bodyText = stripFrontmatter(rawContent);
+
+    if (bodyText.trim().length === 0) {
+      result.skipped++;
+      continue;
+    }
+
+    await store.addPatientReport({
+      id: `import-nar-${record.frontmatter.document_id}`,
+      patientId: record.frontmatter.patient_id,
+      date: record.frontmatter.date ?? 'unknown',
+      type: 'self-observation',
+      content: bodyText.trim(),
+      source: record.frontmatter.source_file,
+      evidenceTier: record.frontmatter.evidence_tier,
+      validationStatus: record.frontmatter.validation_status,
+      sourceCredibility: record.frontmatter.source_credibility,
+    });
+    result.imported++;
+
+    if (verbose) {
+      console.log(`  L2N ${record.frontmatter.document_id} → patient_report (self-observation)`);
+    }
+  }
+
+  // External (Duke University) → consultations with institution
+  const externalRecords = records.filter(
+    (r) => r.frontmatter.document_type === 'external',
+  );
+
+  for (const record of externalRecords) {
+    const rawContent = await readFile(record.filePath, 'utf-8');
+    const bodyText = stripFrontmatter(rawContent);
+
+    if (bodyText.trim().length === 0) {
+      result.skipped++;
+      continue;
+    }
+
+    const fm = record.frontmatter as RecordFrontmatter & Record<string, unknown>;
+    const consultation = {
+      id: `import-ext-${record.frontmatter.document_id}`,
+      patientId: record.frontmatter.patient_id,
+      provider: typeof fm['physician'] === 'string' ? fm['physician'] : 'Unknown',
+      specialty: typeof fm['specialty'] === 'string' ? fm['specialty'] : 'general_medicine',
+      date: record.frontmatter.date ?? 'unknown',
+      conclusionsStatus: 'unknown' as const,
+      findings: bodyText.trim(),
+      institution: fm.facility ?? fm.institution,
+      source: record.frontmatter.source_file,
+      evidenceTier: record.frontmatter.evidence_tier,
+      validationStatus: record.frontmatter.validation_status,
+      sourceCredibility: record.frontmatter.source_credibility,
+    };
+
+    await store.addConsultation(consultation);
+    result.imported++;
+
+    if (verbose) {
+      console.log(`  L2E ${record.frontmatter.document_id} → consultation (external)`);
+    }
+  }
+
+  return result;
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────
 
 function sleep(ms: number): Promise<void> {
@@ -353,8 +586,36 @@ async function main(): Promise<void> {
   // ── Phase 2: Layer 2 ───────────────────────────────────────────────────
   let layer2Result: Layer2Result | undefined;
   if (!opts.layer3Only) {
-    console.log('\nPhase 2: Layer 2 — Structured Lab Results...');
+    console.log('\nPhase 2a: Layer 2 — Structured Lab Results...');
     layer2Result = await importLayer2(validation.valid, opts.verbose);
+  }
+
+  // ── Phase 2b: Layer 2 — Consultations ──────────────────────────────────
+  let consultResult: ConsultationImportResult | undefined;
+  if (!opts.layer3Only) {
+    console.log('\nPhase 2b: Layer 2 — Structured Consultations...');
+    consultResult = await importConsultations(validation.valid, opts.verbose);
+  }
+
+  // ── Phase 2c: Layer 2 — Imaging Reports ────────────────────────────────
+  let imagingResult: ImagingImportResult | undefined;
+  if (!opts.layer3Only) {
+    console.log('\nPhase 2c: Layer 2 — Structured Imaging Reports...');
+    imagingResult = await importImagingReports(validation.valid, opts.verbose);
+  }
+
+  // ── Phase 2d: Layer 2 — Abdominal Reports ──────────────────────────────
+  let abdominalResult: AbdominalImportResult | undefined;
+  if (!opts.layer3Only) {
+    console.log('\nPhase 2d: Layer 2 — Structured Abdominal Reports...');
+    abdominalResult = await importAbdominalReports(validation.valid, opts.verbose);
+  }
+
+  // ── Phase 2e: Layer 2 — Narratives + External ──────────────────────────
+  let narrativeResult: NarrativeImportResult | undefined;
+  if (!opts.layer3Only) {
+    console.log('\nPhase 2e: Layer 2 — Narratives + External Documents...');
+    narrativeResult = await importNarrativesAndExternals(validation.valid, opts.verbose);
   }
 
   // ── Summary ─────────────────────────────────────────────────────────────
@@ -364,12 +625,28 @@ async function main(): Promise<void> {
   console.log('═══════════════════════════════════════════════════');
 
   if (layer3Result) {
-    console.log(`  Layer 3 (Documents):   ${layer3Result.ingested} ingested, ${layer3Result.skipped} skipped, ${layer3Result.errors} errors`);
-    console.log(`                         ${layer3Result.totalChunks} total chunks embedded`);
+    console.log(`  Layer 3 (Documents):     ${layer3Result.ingested} ingested, ${layer3Result.skipped} skipped, ${layer3Result.errors} errors`);
+    console.log(`                           ${layer3Result.totalChunks} total chunks embedded`);
   }
 
   if (layer2Result) {
-    console.log(`  Layer 2 (Lab Results): ${layer2Result.labsInserted} values inserted from ${layer2Result.filesProcessed} files`);
+    console.log(`  Layer 2 (Lab Results):    ${layer2Result.labsInserted} values from ${layer2Result.filesProcessed} files`);
+  }
+
+  if (consultResult) {
+    console.log(`  Layer 2 (Consultations):  ${consultResult.imported} imported, ${consultResult.skipped} skipped`);
+  }
+
+  if (imagingResult) {
+    console.log(`  Layer 2 (Imaging):        ${imagingResult.imported} imported, ${imagingResult.skipped} skipped`);
+  }
+
+  if (abdominalResult) {
+    console.log(`  Layer 2 (Abdominal):      ${abdominalResult.imported} imported, ${abdominalResult.skipped} skipped`);
+  }
+
+  if (narrativeResult) {
+    console.log(`  Layer 2 (Narrative/Ext):  ${narrativeResult.imported} imported, ${narrativeResult.skipped} skipped`);
   }
 
   console.log(`  Time: ${elapsed}s`);

@@ -46,3 +46,5 @@ CLAUDE.personal.md
 npm-debug.log*
 .omc/
 logs/
+audit-report.json
+scripts/audit-report.json

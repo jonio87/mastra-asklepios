@@ -177,7 +177,7 @@ await test('Memory persistence — multi-turn conversation', async () => {
 
 await test('MCP server — tool registration', async () => {
   const { createAsklepiosMcpServer } = await import('../src/mcp/server.js');
-  const server = createAsklepiosMcpServer();
+  const server = await createAsklepiosMcpServer();
   console.log('  ✓ MCP server created successfully');
   console.log(`  ✓ Server type: ${typeof server}`);
   console.log(`  ✓ Internal server: ${typeof server.server}`);

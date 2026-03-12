@@ -1,8 +1,19 @@
 import { createStep, Workflow } from '@mastra/core/workflows';
 import { z } from 'zod';
+import { getBiomedicalTools } from '../clients/biomedical-mcp.js';
 import { deepResearchTool } from '../tools/deep-research.js';
-import { orphanetLookupTool } from '../tools/orphanet-lookup.js';
-import { pubmedSearchTool } from '../tools/pubmed-search.js';
+
+// Resolve MCP tools at module load time (ESM top-level await)
+const bioTools = await getBiomedicalTools();
+
+/**
+ * Find an MCP tool by partial name match (tools are namespaced as serverName_toolName).
+ * Returns the tool's execute function or undefined.
+ */
+function findMcpTool(nameFragment: string) {
+  const entry = Object.entries(bioTools).find(([key]) => key.includes(nameFragment));
+  return entry?.[1];
+}
 
 const DiagnosticResearchInput = z.object({
   patientId: z.string().describe('Anonymized patient identifier'),
@@ -195,69 +206,51 @@ export const diagnosticResearchWorkflow = new Workflow({
         evidenceLevel: string;
       }> = [];
 
-      const executePubmed = pubmedSearchTool.execute;
-      if (!executePubmed) throw new Error('pubmedSearchTool.execute is not defined');
-      const executeOrphanet = orphanetLookupTool.execute;
-      if (!executeOrphanet) throw new Error('orphanetLookupTool.execute is not defined');
       const executeDeepResearch = deepResearchTool.execute;
       if (!executeDeepResearch) throw new Error('deepResearchTool.execute is not defined');
 
+      // Use MCP tools for PubMed and Orphanet (upstream biomedical MCP servers)
+      const pubmedTool = findMcpTool('article_searcher') ?? findMcpTool('pubmed');
+      const orphanetTool = findMcpTool('orphanet') ?? findMcpTool('disease');
+
       const pubmedPromises = inputData.pubmedQueries.map(async (query) => {
-        const result = await executePubmed({ query, maxResults: 5 }, {} as never);
-        if ('articles' in result) {
-          for (const article of result.articles as Array<{
-            pmid: string;
-            title: string;
-            journal: string;
-            publicationDate: string;
-            url: string;
-          }>) {
-            const finding: {
-              source: string;
-              title: string;
-              summary: string;
-              relevance: number;
-              url: string;
-              evidenceLevel: string;
-            } = {
-              source: 'PubMed',
-              title: article.title,
-              summary: `Published in ${article.journal} (${article.publicationDate})`,
-              relevance: 0.7,
-              url: article.url,
-              evidenceLevel: 'unknown',
-            };
-            allFindings.push(finding);
-          }
+        if (!pubmedTool?.execute) return;
+        try {
+          const result = (await pubmedTool.execute(
+            { query, max_results: 5 },
+            {} as never,
+          )) as Record<string, unknown>;
+          // MCP tools return text content — parse if structured
+          const text = typeof result === 'string' ? result : JSON.stringify(result);
+          allFindings.push({
+            source: 'PubMed (MCP)',
+            title: query,
+            summary: text.slice(0, 500),
+            relevance: 0.7,
+            evidenceLevel: 'unknown',
+          });
+        } catch {
+          // PubMed MCP server unavailable — skip silently
         }
       });
 
       const orphanetPromises = inputData.orphanetQueries.map(async (query) => {
-        const result = await executeOrphanet({ query, maxResults: 3 }, {} as never);
-        if ('diseases' in result) {
-          for (const disease of result.diseases as Array<{
-            name: string;
-            definition: string;
-            orphaNumber: number;
-            url: string;
-          }>) {
-            const finding: {
-              source: string;
-              title: string;
-              summary: string;
-              relevance: number;
-              url: string;
-              evidenceLevel: string;
-            } = {
-              source: 'Orphanet',
-              title: disease.name,
-              summary: disease.definition,
-              relevance: 0.8,
-              url: disease.url,
-              evidenceLevel: 'review',
-            };
-            allFindings.push(finding);
-          }
+        if (!orphanetTool?.execute) return;
+        try {
+          const result = (await orphanetTool.execute(
+            { query, max_results: 3 },
+            {} as never,
+          )) as Record<string, unknown>;
+          const text = typeof result === 'string' ? result : JSON.stringify(result);
+          allFindings.push({
+            source: 'Orphanet (MCP)',
+            title: query,
+            summary: text.slice(0, 500),
+            relevance: 0.8,
+            evidenceLevel: 'review',
+          });
+        } catch {
+          // Orphanet MCP server unavailable — skip silently
         }
       });
 

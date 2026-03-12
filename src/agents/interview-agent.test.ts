@@ -25,10 +25,10 @@ describe('interviewAgent', () => {
     expect(instructions).toContain('UNVALIDATED');
   });
 
-  it('has instructions about question generation strategy', async () => {
+  it('has instructions about question categorization', async () => {
     const instructions = await interviewAgent.getInstructions();
-    expect(instructions).toContain('Question Generation Strategy');
-    expect(instructions).toContain('GAPS');
+    expect(instructions).toContain('Question Categorization');
+    expect(instructions).toContain('records-gap');
   });
 
   it('has queryData tool', () => {
