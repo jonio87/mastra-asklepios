@@ -131,7 +131,7 @@ async function searchFindings(
 /**
  * Search Layer 3 document knowledge base using semantic search for each term.
  */
-async function searchDocumentKB(
+async function searchDocumentKb(
   patientId: string,
   searchTerms: string[],
 ): Promise<ContradictingEvidence[]> {
@@ -217,11 +217,7 @@ Returns verified=true only if NO contradicting evidence is found across all sear
       }
 
       if (input.claimType === 'treatment-never-tried') {
-        const treatmentEvidence = await searchTreatments(
-          store,
-          input.patientId,
-          input.searchTerms,
-        );
+        const treatmentEvidence = await searchTreatments(store, input.patientId, input.searchTerms);
         allEvidence.push(...treatmentEvidence);
         searchedLayers.push('Layer 2 - Treatments');
       }
@@ -239,7 +235,7 @@ Returns verified=true only if NO contradicting evidence is found across all sear
     // ── Layer 3 document KB (all claim types) ────────────────────────
 
     try {
-      const docEvidence = await searchDocumentKB(input.patientId, input.searchTerms);
+      const docEvidence = await searchDocumentKb(input.patientId, input.searchTerms);
       allEvidence.push(...docEvidence);
       if (docEvidence.length > 0 || createEmbedder() !== null) {
         searchedLayers.push('Layer 3 - Documents');

@@ -5,9 +5,12 @@ import { clinicalToolSearch } from '../processors/tool-search.js';
 import { brainFeedTool } from '../tools/brain-feed.js';
 import { brainRecallTool } from '../tools/brain-recall.js';
 import { captureDataTool } from '../tools/capture-data.js';
+import { dataCompletenessTool } from '../tools/data-completeness.js';
+import { extractFindingsTool } from '../tools/extract-findings.js';
 import { knowledgeQueryTool } from '../tools/knowledge-query.js';
 import { patientContextTool } from '../tools/patient-context.js';
 import { queryDataTool } from '../tools/query-data.js';
+import { regenerationCheckTool } from '../tools/regeneration-check.js';
 import { researchPlanTool } from '../tools/research-plan.js';
 import { modelRouter } from '../utils/model-router.js';
 import { brainAgent } from './brain-agent.js';
@@ -160,9 +163,25 @@ export const asklepiosAgent = new Agent({
 - All findings must be reviewed by qualified healthcare professionals
 - Always include this disclaimer when presenting diagnostic hypotheses
 
-## Three-Layer Clinical Knowledge Architecture
+## Six-Layer Inverted Pyramid Architecture
 
-You have three layers of patient knowledge, each with a specific purpose:
+You operate on a 6-layer data architecture (Layer 0 = foundation, Layer 5 = deliverables).
+When new data enters Layer 0, it flows upward through all layers. Use **data-completeness** to
+check what's available at each layer, and **regeneration-check** to see if reports need updating.
+
+### Layer 5: Deliverables (Reports, Plans, PDFs)
+Reports like the diagnostic-therapeutic plan. Tracked via report_versions table.
+Use **regeneration-check** when asked about report currency or after new data ingestion.
+
+### Layer 4: Decisions & Hypotheses
+Ranked diagnostic hypotheses, action items, confidence ratings.
+
+### Layer 3: Research (External Knowledge)
+Literature findings, PGx, clinical trials from 80+ biomedical MCP tools.
+
+### Layer 2: Structured Clinical Record (query via query-data tool)
+Labs, imaging reports AND structured imaging findings, diagnoses, progressions, consultations.
+Use **extract-findings** to decompose imaging report text into structured per-finding rows.
 
 ### Layer 1: Clinical Dashboard (Working Memory — always in context)
 Your working memory is a COMPACT clinical dashboard (~1,500 tokens). It shows:
@@ -176,7 +195,11 @@ Your working memory is a COMPACT clinical dashboard (~1,500 tokens). It shows:
 
 IMPORTANT: Keep working memory COMPACT. Do NOT dump full lab history, all medications, or complete symptom lists here. Those belong in Layer 2. The dashboard is what you'd glance at before talking to the patient.
 
-### Layer 2: Structured Clinical Record (query via query-data tool)
+### Layer 0: Source Documents (Foundation)
+329+ source PDFs/scans tracked in source_documents table with SHA-256 hashes, extraction metadata,
+and provenance. Use **data-completeness** to check source document coverage.
+
+### Layer 2 Detail: Structured Clinical Record (query via query-data tool)
 Full patient history stored in a database, queryable on demand via **query-data** tool:
 - type="labs": Historical lab values with trends, reference ranges, flags
 - type="treatments": Treatment trials with efficacy, drug classes, exhausted pathways
@@ -276,9 +299,12 @@ When the flowState field is present in working memory, enforce stage gates. When
     brainFeed: brainFeedTool,
     brainRecall: brainRecallTool,
     captureData: captureDataTool,
+    dataCompleteness: dataCompletenessTool,
+    extractFindings: extractFindingsTool,
     knowledgeQuery: knowledgeQueryTool,
     patientContext: patientContextTool,
     queryData: queryDataTool,
+    regenerationCheck: regenerationCheckTool,
     researchPlan: researchPlanTool,
   },
   // Lazy-load research/phenotype/knowledge tools via BM25 search
