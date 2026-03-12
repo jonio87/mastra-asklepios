@@ -2,6 +2,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { storage } from '../memory.js';
+import { getClinicalStore } from '../storage/clinical-store.js';
+import { getProvenanceStore } from '../storage/provenance-store.js';
 
 /**
  * MCP Resources — patient data + system introspection.
@@ -498,6 +500,104 @@ export function registerResources(server: McpServer): void {
             uri: `agent://${agentId}/config`,
             mimeType: 'application/json',
             text: JSON.stringify({ id: agentId, ...config }, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  // ── Data Layer Resources ────────────────────────────────────────
+
+  server.registerResource(
+    'data-completeness',
+    new ResourceTemplate('patient://{id}/data-completeness', { list: undefined }),
+    {
+      description:
+        'Data completeness dashboard — Layer 0-5 counts, gaps, pending signals. Subscribe for notifications when data changes.',
+      mimeType: 'application/json',
+    },
+    async (_uri, { id }) => {
+      const patientId = id as string;
+      const store = getClinicalStore();
+      const provStore = getProvenanceStore();
+
+      const sourceDocs = await store.querySourceDocuments({ patientId });
+      const byCategory: Record<string, number> = {};
+      for (const doc of sourceDocs) {
+        byCategory[doc.category] = (byCategory[doc.category] ?? 0) + 1;
+      }
+
+      const labs = await store.queryLabs({ patientId });
+      const consults = await store.queryConsultations({ patientId });
+      const imaging = await store.getImagingReports(patientId);
+      const imgFindings = await store.queryImagingFindings({ patientId });
+      const diagnoses = await store.queryDiagnoses({ patientId });
+      const progressions = await store.queryProgressions({ patientId });
+      const treatments = await store.queryTreatments({ patientId });
+      const reportVersions = await store.queryReportVersions(patientId);
+      const pendingSignals = await provStore.getPendingSignals({ patientId });
+
+      return {
+        contents: [
+          {
+            uri: `patient://${patientId}/data-completeness`,
+            mimeType: 'application/json',
+            text: JSON.stringify(
+              {
+                patientId,
+                layer0: { sourceDocuments: sourceDocs.length, byCategory },
+                layer2: {
+                  labResults: labs.length,
+                  consultations: consults.length,
+                  imagingReports: imaging.length,
+                  imagingFindings: imgFindings.length,
+                  diagnoses: diagnoses.length,
+                  progressions: progressions.length,
+                  treatmentTrials: treatments.length,
+                },
+                layer5: { reportVersions: reportVersions.length },
+                pendingChangeSignals: pendingSignals.length,
+                queriedAt: new Date().toISOString(),
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerResource(
+    'provenance-summary',
+    new ResourceTemplate('patient://{id}/provenance-summary', { list: undefined }),
+    {
+      description:
+        'Provenance audit summary — W3C PROV entity counts by layer, signal status distribution.',
+      mimeType: 'application/json',
+    },
+    async (_uri, { id }) => {
+      const patientId = id as string;
+      const provStore = getProvenanceStore();
+
+      const entityCounts = await provStore.getEntityCountsByLayer(patientId);
+      const signalSummary = await provStore.getSignalSummary(patientId);
+
+      return {
+        contents: [
+          {
+            uri: `patient://${patientId}/provenance-summary`,
+            mimeType: 'application/json',
+            text: JSON.stringify(
+              {
+                patientId,
+                entityCountsByLayer: entityCounts,
+                signalSummary,
+                queriedAt: new Date().toISOString(),
+              },
+              null,
+              2,
+            ),
           },
         ],
       };

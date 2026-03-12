@@ -3,13 +3,18 @@ import { z } from 'zod';
 import { normalizeSpecialty } from '../importers/specialty-normalizer.js';
 import type { EvidenceTier, ValidationStatus } from '../schemas/clinical-record.js';
 import { evidenceProvenanceFields } from '../schemas/clinical-record.js';
+import { bodyRegionEnum, diagnosisStatusEnum } from '../schemas/diagnosis.js';
+import { findingDomainEnum, progressionDirectionEnum } from '../schemas/progression.js';
+import { reportLanguageEnum } from '../schemas/report-version.js';
 import {
   certaintyLevelEnum,
   evidenceLevelEnum,
   externalIdTypeEnum,
 } from '../schemas/research-record.js';
+import { extractionMethodEnum, sourceDocCategoryEnum } from '../schemas/source-document.js';
 import type { ClinicalStore } from '../storage/clinical-store.js';
 import { getClinicalStore } from '../storage/clinical-store.js';
+import { getProvenanceStore } from '../storage/provenance-store.js';
 import { logger } from '../utils/logger.js';
 
 const provenanceFields = evidenceProvenanceFields;
@@ -202,6 +207,90 @@ const hypothesisData = z.object({
   ...provenanceFields,
 });
 
+// ─── Layer 0: Source Document ─────────────────────────────────────────
+
+const sourceDocumentData = z.object({
+  type: z.literal('source-document'),
+  patientId: z.string().describe('Patient resource ID'),
+  originalFilename: z.string().describe('Original source file name'),
+  originalFileHash: z.string().describe('SHA-256 of source file'),
+  originalFileSizeBytes: z.number().int().nonnegative().describe('File size in bytes'),
+  originalPageCount: z.number().int().nonnegative().optional().describe('Number of pages'),
+  mimeType: z.string().optional().describe('MIME type (application/pdf, image/jpeg)'),
+  extractionMethod: extractionMethodEnum.describe('How the document was extracted'),
+  extractionConfidence: z.number().min(0).max(1).describe('Extraction confidence 0.0-1.0'),
+  extractionDate: z.string().describe('ISO 8601 extraction date'),
+  extractionTool: z.string().describe('Tool used for extraction'),
+  extractionWave: z.number().int().min(1).optional().describe('Extraction batch number'),
+  extractedMarkdownPath: z.string().describe('Path to extracted markdown file'),
+  preProcessing: z.string().optional().describe('Pre-processing steps applied'),
+  postProcessing: z.string().optional().describe('Post-processing steps applied'),
+  pipelineVersion: z.string().optional().describe('Pipeline version'),
+  category: sourceDocCategoryEnum.describe('Document category'),
+  subcategory: z.string().optional().describe('Subcategory (mri, blood, urine)'),
+  date: z.string().optional().describe('Document date (ISO 8601)'),
+  facility: z.string().optional().describe('Facility name'),
+  physician: z.string().optional().describe('Physician name'),
+  language: z.string().optional().describe('Document language (pl, en, de)'),
+  tags: z.array(z.string()).optional().describe('Document tags'),
+  ...provenanceFields,
+});
+
+// ─── Layer 2F: Diagnosis ─────────────────────────────────────────────
+
+const diagnosisData = z.object({
+  type: z.literal('diagnosis'),
+  patientId: z.string().describe('Patient resource ID'),
+  conditionName: z.string().describe('Condition name (e.g., "Cervical disc herniation at C7/T1")'),
+  conditionNamePl: z.string().optional().describe('Polish name'),
+  icdCode: z.string().optional().describe('ICD-10 code (e.g., "M51.1")'),
+  onsetDate: z.string().optional().describe('When condition started (ISO 8601)'),
+  firstDocumentedDate: z.string().optional().describe('First documented in records (ISO 8601)'),
+  currentStatus: diagnosisStatusEnum.describe('Current diagnosis status'),
+  bodyRegion: bodyRegionEnum.optional().describe('Body region affected'),
+  diagnosisConfidence: z.number().min(0).max(1).optional().describe('Diagnosis confidence 0.0-1.0'),
+  supportingEvidenceIds: z.array(z.string()).optional().describe('IDs of supporting records'),
+  notes: z.string().optional().describe('Additional notes'),
+  ...provenanceFields,
+});
+
+// ─── Layer 2G: Progression ───────────────────────────────────────────
+
+const progressionData = z.object({
+  type: z.literal('progression'),
+  patientId: z.string().describe('Patient resource ID'),
+  findingChainId: z.string().describe('Shared ID for all observations of same finding'),
+  findingName: z.string().describe('Finding name (e.g., "C6/C7 disc", "WBC count")'),
+  findingDomain: findingDomainEnum.describe('Finding domain (imaging, lab, clinical, functional)'),
+  anatomicalLocation: z.string().optional().describe('Anatomical location'),
+  progressionDate: z.string().describe('Observation date (ISO 8601)'),
+  progressionValue: z.string().describe('Observed value (e.g., "protrusion", "3.7 cm")'),
+  numericValue: z.number().optional().describe('Numeric value for quantifiable findings'),
+  progressionUnit: z.string().optional().describe('Unit of measurement'),
+  description: z.string().optional().describe('Detailed description'),
+  direction: progressionDirectionEnum.describe('Progression direction'),
+  comparisonNote: z.string().optional().describe('Comparison note (e.g., "Increased 48%")'),
+  sourceRecordId: z.string().optional().describe('FK to source record'),
+  sourceRecordType: z.string().optional().describe('Source record type'),
+  ...provenanceFields,
+});
+
+// ─── Layer 5: Report Version ─────────────────────────────────────────
+
+const reportVersionData = z.object({
+  type: z.literal('report-version'),
+  patientId: z.string().describe('Patient resource ID'),
+  reportName: z.string().describe('Report name (e.g., "diagnostic-therapeutic-plan")'),
+  reportLanguage: reportLanguageEnum.describe('Report language'),
+  reportVersion: z.string().describe('Version string (e.g., "5.3")'),
+  filePath: z.string().describe('Path to report file'),
+  contentHash: z.string().describe('SHA-256 of file content'),
+  lineCount: z.number().int().nonnegative().optional().describe('Number of lines'),
+  subsectionCount: z.number().int().nonnegative().optional().describe('Number of subsections'),
+  changesSummary: z.string().optional().describe('Summary of changes from prior version'),
+  changeSource: z.string().optional().describe('What triggered this version'),
+});
+
 /**
  * Keep the discriminated union for runtime parsing — it gives precise per-type validation.
  * But Anthropic's API rejects `oneOf` at the top level of tool `input_schema`,
@@ -219,6 +308,10 @@ const captureDataUnion = z.discriminatedUnion('type', [
   researchFindingData,
   researchQueryData,
   hypothesisData,
+  sourceDocumentData,
+  diagnosisData,
+  progressionData,
+  reportVersionData,
 ]);
 
 const captureDataInputSchema = z.object({
@@ -233,6 +326,10 @@ const captureDataInputSchema = z.object({
       'research-finding',
       'research-query',
       'hypothesis',
+      'source-document',
+      'diagnosis',
+      'progression',
+      'report-version',
     ])
     .describe('Type of clinical/research data to capture'),
   patientId: z.string().describe('Patient resource ID'),
@@ -389,6 +486,90 @@ const captureDataInputSchema = z.object({
   certaintyLevel: certaintyLevelEnum.optional().describe('(hypothesis) Certainty level'),
   stage: z.number().int().min(0).max(9).optional().describe('Diagnostic flow stage (0-9)'),
   version: z.number().int().min(1).optional().describe('(hypothesis) Version number'),
+  // source-document fields
+  originalFilename: z.string().optional().describe('(source-document) Original file name'),
+  originalFileHash: z.string().optional().describe('(source-document) SHA-256 of source file'),
+  originalFileSizeBytes: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe('(source-document) File size in bytes'),
+  originalPageCount: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe('(source-document) Page count'),
+  mimeType: z.string().optional().describe('(source-document) MIME type'),
+  extractionMethod: extractionMethodEnum.optional().describe('(source-document) Extraction method'),
+  extractionConfidence: z
+    .number()
+    .min(0)
+    .max(1)
+    .optional()
+    .describe('(source-document) Extraction confidence'),
+  extractionDate: z.string().optional().describe('(source-document) Extraction date'),
+  extractionTool: z.string().optional().describe('(source-document) Extraction tool'),
+  extractionWave: z.number().int().min(1).optional().describe('(source-document) Batch number'),
+  extractedMarkdownPath: z
+    .string()
+    .optional()
+    .describe('(source-document) Path to extracted markdown'),
+  preProcessing: z.string().optional().describe('(source-document) Pre-processing steps'),
+  postProcessing: z.string().optional().describe('(source-document) Post-processing steps'),
+  pipelineVersion: z.string().optional().describe('(source-document) Pipeline version'),
+  docCategory: sourceDocCategoryEnum.optional().describe('(source-document) Document category'),
+  subcategory: z.string().optional().describe('(source-document) Subcategory'),
+  facility: z.string().optional().describe('(source-document/consultation) Facility name'),
+  physician: z.string().optional().describe('(source-document) Physician name'),
+  docLanguage: z.string().optional().describe('(source-document) Document language (pl, en, de)'),
+  tags: z.array(z.string()).optional().describe('(source-document) Tags'),
+  // diagnosis fields
+  conditionName: z.string().optional().describe('(diagnosis) Condition name'),
+  conditionNamePl: z.string().optional().describe('(diagnosis) Polish condition name'),
+  onsetDate: z.string().optional().describe('(diagnosis) When condition started'),
+  firstDocumentedDate: z.string().optional().describe('(diagnosis) First documented date'),
+  currentStatus: diagnosisStatusEnum.optional().describe('(diagnosis) Status'),
+  bodyRegion: bodyRegionEnum.optional().describe('(diagnosis) Body region'),
+  diagnosisConfidence: z
+    .number()
+    .min(0)
+    .max(1)
+    .optional()
+    .describe('(diagnosis) Confidence 0.0-1.0'),
+  supportingEvidenceIds: z
+    .array(z.string())
+    .optional()
+    .describe('(diagnosis) Supporting evidence IDs'),
+  // progression fields
+  findingChainId: z.string().optional().describe('(progression) Shared chain ID'),
+  findingName: z.string().optional().describe('(progression) Finding name'),
+  findingDomain: findingDomainEnum.optional().describe('(progression) Finding domain'),
+  anatomicalLocation: z.string().optional().describe('(progression) Anatomical location'),
+  progressionDate: z.string().optional().describe('(progression) Observation date'),
+  progressionValue: z.string().optional().describe('(progression) Observed value'),
+  numericValue: z.number().optional().describe('(progression) Numeric value'),
+  progressionUnit: z.string().optional().describe('(progression) Unit of measurement'),
+  direction: progressionDirectionEnum.optional().describe('(progression) Direction'),
+  comparisonNote: z.string().optional().describe('(progression) Comparison note'),
+  sourceRecordId: z.string().optional().describe('(progression) FK to source record'),
+  sourceRecordType: z.string().optional().describe('(progression) Source record type'),
+  // report-version fields
+  reportName: z.string().optional().describe('(report-version) Report name'),
+  reportLanguage: reportLanguageEnum.optional().describe('(report-version) Language'),
+  reportVersion: z.string().optional().describe('(report-version) Version string'),
+  filePath: z.string().optional().describe('(report-version) File path'),
+  contentHash: z.string().optional().describe('(report-version) SHA-256 content hash'),
+  lineCount: z.number().int().nonnegative().optional().describe('(report-version) Line count'),
+  subsectionCount: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe('(report-version) Subsection count'),
+  changesSummary: z.string().optional().describe('(report-version) Changes summary'),
+  changeSource: z.string().optional().describe('(report-version) Change trigger'),
   // provenance fields
   ...provenanceFields,
 });
@@ -401,6 +582,30 @@ function generateId(prefix: string): string {
 
 function todayDate(): string {
   return new Date().toISOString().split('T')[0] ?? new Date().toISOString();
+}
+
+async function emitSignal(params: {
+  sourceEntityId: string;
+  changeType: 'new' | 'updated' | 'deleted' | 'invalidated';
+  summary: string;
+  priority: 'low' | 'medium' | 'high' | 'critical';
+  affectedLayers: number[];
+  affectedEntityIds: string[];
+  patientId: string;
+}): Promise<void> {
+  const prov = getProvenanceStore();
+  await prov.emitChangeSignal({
+    id: generateId('csig'),
+    sourceEntityId: params.sourceEntityId,
+    changeType: params.changeType,
+    summary: params.summary,
+    priority: params.priority,
+    affectedLayers: params.affectedLayers,
+    affectedEntityIds: params.affectedEntityIds,
+    patientId: params.patientId,
+    status: 'pending',
+    createdAt: new Date().toISOString(),
+  });
 }
 
 // ─── Handler functions (one per capture type) ────────────────────────
@@ -803,6 +1008,164 @@ async function handleHypothesis(
   return { success: true, id: result.id, duplicate: result.duplicate };
 }
 
+// ─── Layer 0/2/5 handler functions ──────────────────────────────────
+
+async function handleSourceDocument(
+  store: ClinicalStore,
+  input: z.infer<typeof sourceDocumentData>,
+): Promise<CaptureResult> {
+  const id = generateId('sdoc');
+  logger.debug(`captureData(source-document): ${input.originalFilename} for ${input.patientId}`);
+
+  const doc: Record<string, unknown> = {
+    id,
+    patientId: input.patientId,
+    originalFilename: input.originalFilename,
+    originalFileHash: input.originalFileHash,
+    originalFileSizeBytes: input.originalFileSizeBytes,
+    extractionMethod: input.extractionMethod,
+    extractionConfidence: input.extractionConfidence,
+    extractionDate: input.extractionDate,
+    extractionTool: input.extractionTool,
+    extractedMarkdownPath: input.extractedMarkdownPath,
+    category: input.category,
+  };
+  if (input.originalPageCount !== undefined) doc['originalPageCount'] = input.originalPageCount;
+  if (input.mimeType) doc['mimeType'] = input.mimeType;
+  if (input.extractionWave !== undefined) doc['extractionWave'] = input.extractionWave;
+  if (input.preProcessing) doc['preProcessing'] = input.preProcessing;
+  if (input.postProcessing) doc['postProcessing'] = input.postProcessing;
+  if (input.pipelineVersion) doc['pipelineVersion'] = input.pipelineVersion;
+  if (input.subcategory) doc['subcategory'] = input.subcategory;
+  if (input.date) doc['date'] = input.date;
+  if (input.facility) doc['facility'] = input.facility;
+  if (input.physician) doc['physician'] = input.physician;
+  if (input.language) doc['language'] = input.language;
+  if (input.tags) doc['tags'] = input.tags;
+  applyProvenance(doc, input);
+
+  await store.addSourceDocument(doc as Parameters<typeof store.addSourceDocument>[0]);
+
+  await emitSignal({
+    sourceEntityId: id,
+    changeType: 'new',
+    summary: `New source document: ${input.originalFilename}`,
+    priority: 'medium',
+    affectedLayers: [0, 2, 5],
+    affectedEntityIds: [id],
+    patientId: input.patientId,
+  });
+
+  return { success: true, id };
+}
+
+async function handleDiagnosis(
+  store: ClinicalStore,
+  input: z.infer<typeof diagnosisData>,
+): Promise<CaptureResult> {
+  const id = generateId('dx');
+  logger.debug(`captureData(diagnosis): ${input.conditionName} for ${input.patientId}`);
+
+  const dx: Record<string, unknown> = {
+    id,
+    patientId: input.patientId,
+    conditionName: input.conditionName,
+    currentStatus: input.currentStatus,
+  };
+  if (input.conditionNamePl) dx['conditionNamePl'] = input.conditionNamePl;
+  if (input.icdCode) dx['icdCode'] = input.icdCode;
+  if (input.onsetDate) dx['onsetDate'] = input.onsetDate;
+  if (input.firstDocumentedDate) dx['firstDocumentedDate'] = input.firstDocumentedDate;
+  if (input.bodyRegion) dx['bodyRegion'] = input.bodyRegion;
+  if (input.diagnosisConfidence !== undefined) dx['confidence'] = input.diagnosisConfidence;
+  if (input.supportingEvidenceIds) dx['supportingEvidenceIds'] = input.supportingEvidenceIds;
+  if (input.notes) dx['notes'] = input.notes;
+  applyProvenance(dx, input);
+
+  await store.addDiagnosis(dx as Parameters<typeof store.addDiagnosis>[0]);
+
+  await emitSignal({
+    sourceEntityId: id,
+    changeType: 'new',
+    summary: `New diagnosis: ${input.conditionName}`,
+    priority: 'high',
+    affectedLayers: [2, 5],
+    affectedEntityIds: [id],
+    patientId: input.patientId,
+  });
+
+  return { success: true, id };
+}
+
+async function handleProgression(
+  store: ClinicalStore,
+  input: z.infer<typeof progressionData>,
+): Promise<CaptureResult> {
+  const id = generateId('prog');
+  logger.debug(`captureData(progression): ${input.findingName} for ${input.patientId}`);
+
+  const prog: Record<string, unknown> = {
+    id,
+    patientId: input.patientId,
+    findingChainId: input.findingChainId,
+    findingName: input.findingName,
+    findingDomain: input.findingDomain,
+    date: input.progressionDate,
+    value: input.progressionValue,
+    direction: input.direction,
+  };
+  if (input.anatomicalLocation) prog['anatomicalLocation'] = input.anatomicalLocation;
+  if (input.numericValue !== undefined) prog['numericValue'] = input.numericValue;
+  if (input.progressionUnit) prog['unit'] = input.progressionUnit;
+  if (input.description) prog['description'] = input.description;
+  if (input.comparisonNote) prog['comparisonNote'] = input.comparisonNote;
+  if (input.sourceRecordId) prog['sourceRecordId'] = input.sourceRecordId;
+  if (input.sourceRecordType) prog['sourceRecordType'] = input.sourceRecordType;
+  applyProvenance(prog, input);
+
+  await store.addProgression(prog as Parameters<typeof store.addProgression>[0]);
+
+  await emitSignal({
+    sourceEntityId: id,
+    changeType: 'new',
+    summary: `Progression: ${input.findingName} — ${input.direction}`,
+    priority: 'medium',
+    affectedLayers: [2, 5],
+    affectedEntityIds: [id],
+    patientId: input.patientId,
+  });
+
+  return { success: true, id };
+}
+
+async function handleReportVersion(
+  store: ClinicalStore,
+  input: z.infer<typeof reportVersionData>,
+): Promise<CaptureResult> {
+  const id = generateId('rver');
+  logger.debug(
+    `captureData(report-version): ${input.reportName} v${input.reportVersion} for ${input.patientId}`,
+  );
+
+  const report: Record<string, unknown> = {
+    id,
+    patientId: input.patientId,
+    reportName: input.reportName,
+    language: input.reportLanguage,
+    version: input.reportVersion,
+    filePath: input.filePath,
+    contentHash: input.contentHash,
+    createdAt: new Date().toISOString(),
+  };
+  if (input.lineCount !== undefined) report['lineCount'] = input.lineCount;
+  if (input.subsectionCount !== undefined) report['subsectionCount'] = input.subsectionCount;
+  if (input.changesSummary) report['changesSummary'] = input.changesSummary;
+  if (input.changeSource) report['changeSource'] = input.changeSource;
+
+  await store.addReportVersion(report as Parameters<typeof store.addReportVersion>[0]);
+  return { success: true, id };
+}
+
 // ─── Tool definition ─────────────────────────────────────────────────
 
 export const captureDataTool = createTool({
@@ -816,7 +1179,11 @@ export const captureDataTool = createTool({
 - "consultation": Specialist visits with findings, conclusions status, recommendations
 - "research-finding": Literature findings (PMIDs, trials, gene pathways) with external IDs and evidence levels
 - "research-query": Research query audit trail with tool used, result count, synthesis, and gaps
-- "hypothesis": Diagnostic hypotheses with probability ranges, advocate/skeptic cases, certainty levels`,
+- "hypothesis": Diagnostic hypotheses with probability ranges, advocate/skeptic cases, certainty levels
+- "source-document": Layer 0 source document registration with extraction metadata
+- "diagnosis": Explicit diagnosis registry entry with ICD-10, onset, status, body region
+- "progression": Temporal chain tracking — same finding across multiple dates
+- "report-version": Layer 5 report version registration with content hash and change tracking`,
   inputSchema: captureDataInputSchema,
   outputSchema: z.object({
     success: z.boolean(),
@@ -846,6 +1213,14 @@ export const captureDataTool = createTool({
         return handleResearchQuery(store, parsed);
       case 'hypothesis':
         return handleHypothesis(store, parsed);
+      case 'source-document':
+        return handleSourceDocument(store, parsed);
+      case 'diagnosis':
+        return handleDiagnosis(store, parsed);
+      case 'progression':
+        return handleProgression(store, parsed);
+      case 'report-version':
+        return handleReportVersion(store, parsed);
     }
   },
 });

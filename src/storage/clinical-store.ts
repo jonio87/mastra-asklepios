@@ -56,6 +56,9 @@ export class ClinicalStore {
 
   async ensureInitialized(): Promise<void> {
     if (this.initialized) return;
+    // Enable FK constraints — SQLite disables them by default per-connection.
+    // Use executeMultiple to avoid libsql treating PRAGMA as parameterized statement.
+    await this.client.executeMultiple('PRAGMA foreign_keys = ON;');
     await this.migrate();
     this.initialized = true;
   }
@@ -371,7 +374,9 @@ export class ClinicalStore {
       `CREATE TABLE IF NOT EXISTS clinical_imaging_findings (
                 id TEXT PRIMARY KEY,
                 patient_id TEXT NOT NULL,
-                imaging_report_id TEXT NOT NULL,
+                imaging_report_id TEXT NOT NULL
+                    REFERENCES clinical_imaging_reports(id)
+                    ON DELETE CASCADE ON UPDATE CASCADE,
                 anatomical_location TEXT NOT NULL,
                 finding_type TEXT NOT NULL,
                 laterality TEXT,
@@ -467,7 +472,9 @@ export class ClinicalStore {
       `CREATE TABLE IF NOT EXISTS report_data_integration (
                 id TEXT PRIMARY KEY,
                 patient_id TEXT NOT NULL,
-                report_version_id TEXT NOT NULL,
+                report_version_id TEXT NOT NULL
+                    REFERENCES report_versions(id)
+                    ON DELETE CASCADE ON UPDATE CASCADE,
                 data_id TEXT NOT NULL,
                 data_type TEXT NOT NULL,
                 integration_status TEXT NOT NULL,
@@ -646,10 +653,17 @@ export class ClinicalStore {
    * Warns if a patient_id returns 0 results but similar IDs exist.
    * Call this from query methods to detect silent ID mismatches.
    */
-  private async warnIfIdMismatch(patientId: string, table: string, resultCount: number): Promise<void> {
+  private async warnIfIdMismatch(
+    patientId: string,
+    table: string,
+    resultCount: number,
+  ): Promise<void> {
     if (resultCount > 0) return;
     // Extract the base name (remove 'patient-' prefix, normalize unicode)
-    const baseName = patientId.replace(/^patient-/, '').normalize('NFC').toLowerCase();
+    const baseName = patientId
+      .replace(/^patient-/, '')
+      .normalize('NFC')
+      .toLowerCase();
     const result = await this.client.execute({
       sql: `SELECT DISTINCT patient_id FROM ${table} WHERE patient_id LIKE ?`,
       args: [`%${baseName.slice(0, 6)}%`],
@@ -2219,15 +2233,32 @@ export class ClinicalStore {
               evidence_tier, validation_status, source_credibility
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
-        doc.id, doc.patientId, doc.originalFilename, doc.originalFileHash,
-        doc.originalFileSizeBytes, doc.originalPageCount ?? null, doc.mimeType ?? null,
-        doc.extractionMethod, doc.extractionConfidence, doc.extractionDate,
-        doc.extractionTool, doc.extractionWave ?? null, doc.extractedMarkdownPath,
-        doc.preProcessing ?? null, doc.postProcessing ?? null, doc.pipelineVersion ?? null,
-        doc.category, doc.subcategory ?? null, doc.date ?? null, doc.facility ?? null,
-        doc.physician ?? null, doc.language ?? null,
+        doc.id,
+        doc.patientId,
+        doc.originalFilename,
+        doc.originalFileHash,
+        doc.originalFileSizeBytes,
+        doc.originalPageCount ?? null,
+        doc.mimeType ?? null,
+        doc.extractionMethod,
+        doc.extractionConfidence,
+        doc.extractionDate,
+        doc.extractionTool,
+        doc.extractionWave ?? null,
+        doc.extractedMarkdownPath,
+        doc.preProcessing ?? null,
+        doc.postProcessing ?? null,
+        doc.pipelineVersion ?? null,
+        doc.category,
+        doc.subcategory ?? null,
+        doc.date ?? null,
+        doc.facility ?? null,
+        doc.physician ?? null,
+        doc.language ?? null,
         doc.tags ? JSON.stringify(doc.tags) : null,
-        doc.evidenceTier ?? null, doc.validationStatus ?? null, doc.sourceCredibility ?? null,
+        doc.evidenceTier ?? null,
+        doc.validationStatus ?? null,
+        doc.sourceCredibility ?? null,
       ],
     });
   }
@@ -2248,11 +2279,26 @@ export class ClinicalStore {
     const conditions = ['patient_id = ?'];
     const args: InValue[] = [params.patientId];
 
-    if (params.category) { conditions.push('category = ?'); args.push(params.category); }
-    if (params.dateFrom) { conditions.push('date >= ?'); args.push(params.dateFrom); }
-    if (params.dateTo) { conditions.push('date <= ?'); args.push(params.dateTo); }
-    if (params.facility) { conditions.push('facility LIKE ?'); args.push(`%${params.facility}%`); }
-    if (params.extractionMethod) { conditions.push('extraction_method = ?'); args.push(params.extractionMethod); }
+    if (params.category) {
+      conditions.push('category = ?');
+      args.push(params.category);
+    }
+    if (params.dateFrom) {
+      conditions.push('date >= ?');
+      args.push(params.dateFrom);
+    }
+    if (params.dateTo) {
+      conditions.push('date <= ?');
+      args.push(params.dateTo);
+    }
+    if (params.facility) {
+      conditions.push('facility LIKE ?');
+      args.push(`%${params.facility}%`);
+    }
+    if (params.extractionMethod) {
+      conditions.push('extraction_method = ?');
+      args.push(params.extractionMethod);
+    }
 
     const limit = params.limit ?? 500;
     const result = await this.client.execute({
@@ -2297,13 +2343,22 @@ export class ClinicalStore {
               evidence_tier, validation_status, source_credibility
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
-        finding.id, finding.patientId, finding.imagingReportId,
-        finding.anatomicalLocation, finding.findingType,
-        finding.laterality ?? null, finding.measurement ?? null,
-        finding.measurementUnit ?? null, finding.severity ?? null,
-        finding.description, finding.nerveInvolvement ?? null,
-        finding.comparisonToPrior ?? null, finding.date, finding.radiologist ?? null,
-        finding.evidenceTier ?? null, finding.validationStatus ?? null,
+        finding.id,
+        finding.patientId,
+        finding.imagingReportId,
+        finding.anatomicalLocation,
+        finding.findingType,
+        finding.laterality ?? null,
+        finding.measurement ?? null,
+        finding.measurementUnit ?? null,
+        finding.severity ?? null,
+        finding.description,
+        finding.nerveInvolvement ?? null,
+        finding.comparisonToPrior ?? null,
+        finding.date,
+        finding.radiologist ?? null,
+        finding.evidenceTier ?? null,
+        finding.validationStatus ?? null,
         finding.sourceCredibility ?? null,
       ],
     });
@@ -2321,13 +2376,22 @@ export class ClinicalStore {
               evidence_tier, validation_status, source_credibility
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
-        f.id, f.patientId, f.imagingReportId,
-        f.anatomicalLocation, f.findingType,
-        f.laterality ?? null, f.measurement ?? null,
-        f.measurementUnit ?? null, f.severity ?? null,
-        f.description, f.nerveInvolvement ?? null,
-        f.comparisonToPrior ?? null, f.date, f.radiologist ?? null,
-        f.evidenceTier ?? null, f.validationStatus ?? null,
+        f.id,
+        f.patientId,
+        f.imagingReportId,
+        f.anatomicalLocation,
+        f.findingType,
+        f.laterality ?? null,
+        f.measurement ?? null,
+        f.measurementUnit ?? null,
+        f.severity ?? null,
+        f.description,
+        f.nerveInvolvement ?? null,
+        f.comparisonToPrior ?? null,
+        f.date,
+        f.radiologist ?? null,
+        f.evidenceTier ?? null,
+        f.validationStatus ?? null,
         f.sourceCredibility ?? null,
       ] as InValue[],
     }));
@@ -2343,7 +2407,10 @@ export class ClinicalStore {
     const conditions = ['patient_id = ?'];
     const args: InValue[] = [params.patientId];
 
-    if (params.imagingReportId) { conditions.push('imaging_report_id = ?'); args.push(params.imagingReportId); }
+    if (params.imagingReportId) {
+      conditions.push('imaging_report_id = ?');
+      args.push(params.imagingReportId);
+    }
     if (params.anatomicalLocation) {
       if (params.anatomicalLocation.includes('%')) {
         conditions.push('anatomical_location LIKE ?');
@@ -2352,9 +2419,18 @@ export class ClinicalStore {
       }
       args.push(params.anatomicalLocation);
     }
-    if (params.findingType) { conditions.push('finding_type = ?'); args.push(params.findingType); }
-    if (params.dateFrom) { conditions.push('date >= ?'); args.push(params.dateFrom); }
-    if (params.dateTo) { conditions.push('date <= ?'); args.push(params.dateTo); }
+    if (params.findingType) {
+      conditions.push('finding_type = ?');
+      args.push(params.findingType);
+    }
+    if (params.dateFrom) {
+      conditions.push('date >= ?');
+      args.push(params.dateFrom);
+    }
+    if (params.dateTo) {
+      conditions.push('date <= ?');
+      args.push(params.dateTo);
+    }
 
     const limit = params.limit ?? 200;
     const result = await this.client.execute({
@@ -2377,14 +2453,23 @@ export class ClinicalStore {
               created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
-        dx.id, dx.patientId, dx.icd10Code ?? null, dx.conditionName,
-        dx.conditionNamePl ?? null, dx.onsetDate ?? null,
-        dx.firstDocumentedDate ?? null, dx.currentStatus, dx.bodyRegion ?? null,
+        dx.id,
+        dx.patientId,
+        dx.icd10Code ?? null,
+        dx.conditionName,
+        dx.conditionNamePl ?? null,
+        dx.onsetDate ?? null,
+        dx.firstDocumentedDate ?? null,
+        dx.currentStatus,
+        dx.bodyRegion ?? null,
         dx.confidence ?? null,
         dx.supportingEvidenceIds ? JSON.stringify(dx.supportingEvidenceIds) : null,
         dx.notes ?? null,
-        dx.evidenceTier ?? null, dx.validationStatus ?? null, dx.sourceCredibility ?? null,
-        dx.createdAt ?? new Date().toISOString(), dx.updatedAt ?? new Date().toISOString(),
+        dx.evidenceTier ?? null,
+        dx.validationStatus ?? null,
+        dx.sourceCredibility ?? null,
+        dx.createdAt ?? new Date().toISOString(),
+        dx.updatedAt ?? new Date().toISOString(),
       ],
     });
   }
@@ -2394,9 +2479,18 @@ export class ClinicalStore {
     const conditions = ['patient_id = ?'];
     const args: InValue[] = [params.patientId];
 
-    if (params.icd10Code) { conditions.push('icd10_code = ?'); args.push(params.icd10Code); }
-    if (params.currentStatus) { conditions.push('current_status = ?'); args.push(params.currentStatus); }
-    if (params.bodyRegion) { conditions.push('body_region = ?'); args.push(params.bodyRegion); }
+    if (params.icd10Code) {
+      conditions.push('icd10_code = ?');
+      args.push(params.icd10Code);
+    }
+    if (params.currentStatus) {
+      conditions.push('current_status = ?');
+      args.push(params.currentStatus);
+    }
+    if (params.bodyRegion) {
+      conditions.push('body_region = ?');
+      args.push(params.bodyRegion);
+    }
 
     const limit = params.limit ?? 100;
     const result = await this.client.execute({
@@ -2418,12 +2512,23 @@ export class ClinicalStore {
               evidence_tier, validation_status, source_credibility
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
-        prog.id, prog.patientId, prog.findingChainId, prog.findingName,
-        prog.findingDomain, prog.anatomicalLocation ?? null, prog.date,
-        prog.value, prog.numericValue ?? null, prog.unit ?? null,
-        prog.description ?? null, prog.direction, prog.comparisonNote ?? null,
-        prog.sourceRecordId ?? null, prog.sourceRecordType ?? null,
-        prog.evidenceTier ?? null, prog.validationStatus ?? null,
+        prog.id,
+        prog.patientId,
+        prog.findingChainId,
+        prog.findingName,
+        prog.findingDomain,
+        prog.anatomicalLocation ?? null,
+        prog.date,
+        prog.value,
+        prog.numericValue ?? null,
+        prog.unit ?? null,
+        prog.description ?? null,
+        prog.direction,
+        prog.comparisonNote ?? null,
+        prog.sourceRecordId ?? null,
+        prog.sourceRecordType ?? null,
+        prog.evidenceTier ?? null,
+        prog.validationStatus ?? null,
         prog.sourceCredibility ?? null,
       ],
     });
@@ -2434,9 +2539,18 @@ export class ClinicalStore {
     const conditions = ['patient_id = ?'];
     const args: InValue[] = [params.patientId];
 
-    if (params.findingChainId) { conditions.push('finding_chain_id = ?'); args.push(params.findingChainId); }
-    if (params.findingName) { conditions.push('finding_name = ?'); args.push(params.findingName); }
-    if (params.findingDomain) { conditions.push('finding_domain = ?'); args.push(params.findingDomain); }
+    if (params.findingChainId) {
+      conditions.push('finding_chain_id = ?');
+      args.push(params.findingChainId);
+    }
+    if (params.findingName) {
+      conditions.push('finding_name = ?');
+      args.push(params.findingName);
+    }
+    if (params.findingDomain) {
+      conditions.push('finding_domain = ?');
+      args.push(params.findingDomain);
+    }
     if (params.anatomicalLocation) {
       if (params.anatomicalLocation.includes('%')) {
         conditions.push('anatomical_location LIKE ?');
@@ -2445,8 +2559,14 @@ export class ClinicalStore {
       }
       args.push(params.anatomicalLocation);
     }
-    if (params.dateFrom) { conditions.push('date >= ?'); args.push(params.dateFrom); }
-    if (params.dateTo) { conditions.push('date <= ?'); args.push(params.dateTo); }
+    if (params.dateFrom) {
+      conditions.push('date >= ?');
+      args.push(params.dateFrom);
+    }
+    if (params.dateTo) {
+      conditions.push('date <= ?');
+      args.push(params.dateTo);
+    }
 
     const limit = params.limit ?? 200;
     const result = await this.client.execute({
@@ -2476,10 +2596,17 @@ export class ClinicalStore {
               changes_summary, change_source, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
-        report.id, report.patientId, report.reportName, report.language,
-        report.version, report.filePath, report.contentHash,
-        report.lineCount ?? null, report.subsectionCount ?? null,
-        report.changesSummary ?? null, report.changeSource ?? null,
+        report.id,
+        report.patientId,
+        report.reportName,
+        report.language,
+        report.version,
+        report.filePath,
+        report.contentHash,
+        report.lineCount ?? null,
+        report.subsectionCount ?? null,
+        report.changesSummary ?? null,
+        report.changeSource ?? null,
         report.createdAt,
       ],
     });
@@ -2522,10 +2649,16 @@ export class ClinicalStore {
               exclusion_reason, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
-        integration.id, integration.patientId, integration.reportVersionId,
-        integration.dataId, integration.dataType, integration.integrationStatus,
-        integration.sectionAffected ?? null, integration.integratedAt ?? null,
-        integration.exclusionReason ?? null, integration.createdAt,
+        integration.id,
+        integration.patientId,
+        integration.reportVersionId,
+        integration.dataId,
+        integration.dataType,
+        integration.integrationStatus,
+        integration.sectionAffected ?? null,
+        integration.integratedAt ?? null,
+        integration.exclusionReason ?? null,
+        integration.createdAt,
       ],
     });
   }
@@ -2835,7 +2968,8 @@ function mapRowToImagingFinding(row: Record<string, unknown>): ImagingFinding {
     date: String(row['date']),
     ...mapProvenance(row),
   };
-  if (row['laterality']) result.laterality = String(row['laterality']) as ImagingFinding['laterality'];
+  if (row['laterality'])
+    result.laterality = String(row['laterality']) as ImagingFinding['laterality'];
   if (row['measurement'] !== null && row['measurement'] !== undefined)
     result.measurement = Number(row['measurement']);
   if (row['measurement_unit']) result.measurementUnit = String(row['measurement_unit']);
@@ -2857,7 +2991,8 @@ function mapRowToDiagnosis(row: Record<string, unknown>): Diagnosis {
   if (row['icd10_code']) result.icd10Code = String(row['icd10_code']);
   if (row['condition_name_pl']) result.conditionNamePl = String(row['condition_name_pl']);
   if (row['onset_date']) result.onsetDate = String(row['onset_date']);
-  if (row['first_documented_date']) result.firstDocumentedDate = String(row['first_documented_date']);
+  if (row['first_documented_date'])
+    result.firstDocumentedDate = String(row['first_documented_date']);
   if (row['body_region']) result.bodyRegion = String(row['body_region']) as Diagnosis['bodyRegion'];
   if (row['confidence'] !== null && row['confidence'] !== undefined)
     result.confidence = Number(row['confidence']);
@@ -2919,7 +3054,9 @@ function mapRowToReportDataIntegration(row: Record<string, unknown>): ReportData
     reportVersionId: String(row['report_version_id']),
     dataId: String(row['data_id']),
     dataType: String(row['data_type']) as ReportDataIntegration['dataType'],
-    integrationStatus: String(row['integration_status']) as ReportDataIntegration['integrationStatus'],
+    integrationStatus: String(
+      row['integration_status'],
+    ) as ReportDataIntegration['integrationStatus'],
     createdAt: String(row['created_at']),
   };
   if (row['section_affected']) result.sectionAffected = String(row['section_affected']);
@@ -3049,4 +3186,9 @@ export function getClinicalStore(): ClinicalStore {
     Instance = new ClinicalStore();
   }
   return Instance;
+}
+
+/** Replace the singleton for testing — ONLY for test use. */
+export function setClinicalStoreForTest(store: ClinicalStore): void {
+  Instance = store;
 }

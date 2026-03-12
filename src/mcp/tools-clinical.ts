@@ -2,11 +2,16 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { mastra } from '../mastra.js';
 import { evidenceProvenanceFields } from '../schemas/clinical-record.js';
+import { bodyRegionEnum, diagnosisStatusEnum } from '../schemas/diagnosis.js';
+import { findingTypeEnum } from '../schemas/imaging-finding.js';
+import { findingDomainEnum, progressionDirectionEnum } from '../schemas/progression.js';
+import { reportLanguageEnum } from '../schemas/report-version.js';
 import {
   certaintyLevelEnum,
   evidenceLevelEnum,
   externalIdTypeEnum,
 } from '../schemas/research-record.js';
+import { extractionMethodEnum, sourceDocCategoryEnum } from '../schemas/source-document.js';
 import { getClinicalStore } from '../storage/clinical-store.js';
 import { captureDataTool } from '../tools/capture-data.js';
 import { evidenceLinkTool } from '../tools/evidence-link.js';
@@ -25,7 +30,7 @@ export function registerClinicalTools(server: McpServer): void {
     'capture_clinical_data',
     {
       description:
-        'Capture clinical or research data into the structured record. Uses a type discriminator to route data to the correct handler. Supports: patient-report, agent-learning, contradiction, lab-result, treatment-trial, consultation, research-finding (literature/trial findings with external IDs), research-query (search audit trail), hypothesis (diagnostic hypotheses with probability ranges).',
+        'Capture clinical or research data into the structured record. Uses a type discriminator to route data to the correct handler. Supports: patient-report, agent-learning, contradiction, lab-result, treatment-trial, consultation, research-finding, research-query, hypothesis, source-document (Layer 0 provenance-tracked source files), diagnosis (Layer 2F explicit diagnosis registry), progression (Layer 2G temporal finding chains), report-version (Layer 5 versioned report tracking).',
       inputSchema: {
         type: z
           .enum([
@@ -38,6 +43,10 @@ export function registerClinicalTools(server: McpServer): void {
             'research-finding',
             'research-query',
             'hypothesis',
+            'source-document',
+            'diagnosis',
+            'progression',
+            'report-version',
           ])
           .describe('Type of clinical/research data to capture'),
         patientId: z.string().describe('Patient resource ID (e.g., "patient-001")'),
@@ -241,6 +250,113 @@ export function registerClinicalTools(server: McpServer): void {
           .min(1)
           .optional()
           .describe('[hypothesis] Version number (increments on re-ranking)'),
+        // source-document fields (Layer 0)
+        originalFilename: z.string().optional().describe('[source-document] Original file name'),
+        originalFileHash: z
+          .string()
+          .optional()
+          .describe('[source-document] SHA-256 of source file'),
+        originalFileSizeBytes: z
+          .number()
+          .int()
+          .nonnegative()
+          .optional()
+          .describe('[source-document] File size in bytes'),
+        originalPageCount: z
+          .number()
+          .int()
+          .nonnegative()
+          .optional()
+          .describe('[source-document] Page count'),
+        mimeType: z.string().optional().describe('[source-document] MIME type'),
+        extractionMethod: extractionMethodEnum
+          .optional()
+          .describe('[source-document] Extraction method'),
+        extractionConfidence: z
+          .number()
+          .min(0)
+          .max(1)
+          .optional()
+          .describe('[source-document] Extraction confidence 0.0-1.0'),
+        extractionDate: z.string().optional().describe('[source-document] Extraction date'),
+        extractionTool: z.string().optional().describe('[source-document] Extraction tool'),
+        extractionWave: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe('[source-document] Batch number'),
+        extractedMarkdownPath: z
+          .string()
+          .optional()
+          .describe('[source-document] Path to extracted markdown'),
+        preProcessing: z.string().optional().describe('[source-document] Pre-processing steps'),
+        postProcessing: z.string().optional().describe('[source-document] Post-processing steps'),
+        pipelineVersion: z.string().optional().describe('[source-document] Pipeline version'),
+        docCategory: sourceDocCategoryEnum
+          .optional()
+          .describe('[source-document] Document category'),
+        subcategory: z.string().optional().describe('[source-document] Subcategory'),
+        facility: z.string().optional().describe('[source-document|consultation] Facility name'),
+        physician: z.string().optional().describe('[source-document] Physician name'),
+        docLanguage: z
+          .string()
+          .optional()
+          .describe('[source-document] Document language (pl, en, de)'),
+        tags: z.array(z.string()).optional().describe('[source-document] Document tags'),
+        // diagnosis fields (Layer 2F)
+        conditionName: z.string().optional().describe('[diagnosis] Condition name'),
+        conditionNamePl: z.string().optional().describe('[diagnosis] Polish condition name'),
+        onsetDate: z.string().optional().describe('[diagnosis] When condition started'),
+        firstDocumentedDate: z.string().optional().describe('[diagnosis] First documented date'),
+        currentStatus: diagnosisStatusEnum.optional().describe('[diagnosis] Current status'),
+        bodyRegion: bodyRegionEnum.optional().describe('[diagnosis] Body region'),
+        diagnosisConfidence: z
+          .number()
+          .min(0)
+          .max(1)
+          .optional()
+          .describe('[diagnosis] Confidence 0.0-1.0'),
+        supportingEvidenceIds: z
+          .array(z.string())
+          .optional()
+          .describe('[diagnosis] Supporting evidence IDs'),
+        // progression fields (Layer 2G)
+        findingChainId: z.string().optional().describe('[progression] Shared chain ID'),
+        findingName: z.string().optional().describe('[progression] Finding name'),
+        findingDomain: findingDomainEnum.optional().describe('[progression] Finding domain'),
+        anatomicalLocation: z.string().optional().describe('[progression] Anatomical location'),
+        progressionDate: z.string().optional().describe('[progression] Observation date'),
+        progressionValue: z.string().optional().describe('[progression] Observed value'),
+        numericValue: z.number().optional().describe('[progression] Numeric value'),
+        progressionUnit: z.string().optional().describe('[progression] Unit of measurement'),
+        direction: progressionDirectionEnum.optional().describe('[progression] Direction'),
+        comparisonNote: z.string().optional().describe('[progression] Comparison note'),
+        sourceRecordId: z.string().optional().describe('[progression] FK to source record'),
+        sourceRecordType: z.string().optional().describe('[progression] Source record type'),
+        // report-version fields (Layer 5)
+        reportName: z.string().optional().describe('[report-version] Report name'),
+        reportLanguage: reportLanguageEnum.optional().describe('[report-version] Language'),
+        reportVersion: z.string().optional().describe('[report-version] Version string'),
+        filePath: z.string().optional().describe('[report-version] File path'),
+        contentHash: z.string().optional().describe('[report-version] SHA-256 content hash'),
+        lineCount: z
+          .number()
+          .int()
+          .nonnegative()
+          .optional()
+          .describe('[report-version] Line count'),
+        subsectionCount: z
+          .number()
+          .int()
+          .nonnegative()
+          .optional()
+          .describe('[report-version] Subsection count'),
+        changesSummary: z.string().optional().describe('[report-version] Changes summary'),
+        changeSource: z
+          .string()
+          .optional()
+          .describe('[report-version] What triggered this version'),
         // evidence provenance fields (apply to all types) — imported from clinical-record.ts
         ...evidenceProvenanceFields,
       },
@@ -285,7 +401,7 @@ export function registerClinicalTools(server: McpServer): void {
     'query_clinical_data',
     {
       description:
-        'Query structured clinical or research data. Uses a type discriminator to route the query. Supports: labs (with trend computation), treatments (with exhausted-class detection), consultations (with missing-conclusion flagging), contradictions (with resolution tracking), patient-history (composite recent view), findings (research literature/trial findings), research-queries (search audit trail), hypotheses (diagnostic hypotheses with evidence links), hypothesis-timeline (full version chain with confidence evolution and direction changes), research-summary (aggregate statistics).',
+        'Query structured clinical or research data. Uses a type discriminator to route the query. Supports: labs, treatments, consultations, contradictions, patient-history, findings, research-queries, hypotheses, hypothesis-timeline, research-summary, source-documents (Layer 0 with category counts), imaging-findings (structured decomposed findings), diagnoses (ICD-10 registry), progressions (temporal chains), report-versions (version history).',
       inputSchema: {
         type: z
           .enum([
@@ -299,6 +415,11 @@ export function registerClinicalTools(server: McpServer): void {
             'hypotheses',
             'hypothesis-timeline',
             'research-summary',
+            'source-documents',
+            'imaging-findings',
+            'diagnoses',
+            'progressions',
+            'report-versions',
           ])
           .describe('Type of clinical/research data to query'),
         patientId: z.string().describe('Patient resource ID'),
@@ -376,6 +497,42 @@ export function registerClinicalTools(server: McpServer): void {
           .string()
           .optional()
           .describe('[hypothesis-timeline] Exact hypothesis name to trace through version history'),
+        // source-documents filters (Layer 0)
+        category: sourceDocCategoryEnum
+          .optional()
+          .describe('[source-documents] Filter by document category'),
+        qFacility: z.string().optional().describe('[source-documents] Filter by facility'),
+        extractionMethod: extractionMethodEnum
+          .optional()
+          .describe('[source-documents] Filter by extraction method'),
+        // imaging-findings filters (Layer 2E)
+        anatomicalLocation: z
+          .string()
+          .optional()
+          .describe('[imaging-findings|progressions] Filter by anatomical location'),
+        findingType: findingTypeEnum
+          .optional()
+          .describe('[imaging-findings] Filter by finding type'),
+        imagingReportId: z
+          .string()
+          .optional()
+          .describe('[imaging-findings] Filter by parent imaging report'),
+        // diagnoses filters (Layer 2F)
+        icd10Code: z.string().optional().describe('[diagnoses] Filter by ICD-10 code'),
+        qCurrentStatus: diagnosisStatusEnum
+          .optional()
+          .describe('[diagnoses] Filter by diagnosis status'),
+        qBodyRegion: bodyRegionEnum.optional().describe('[diagnoses] Filter by body region'),
+        // progressions filters (Layer 2G)
+        findingChainId: z.string().optional().describe('[progressions] Filter by finding chain ID'),
+        qFindingName: z.string().optional().describe('[progressions] Filter by finding name'),
+        qFindingDomain: findingDomainEnum
+          .optional()
+          .describe('[progressions] Filter by domain (imaging, lab, clinical, functional)'),
+        // report-versions filters (Layer 5)
+        qReportName: z.string().optional().describe('[report-versions] Filter by report name'),
+        qLanguage: reportLanguageEnum.optional().describe('[report-versions] Filter by language'),
+        limit: z.number().int().positive().optional().describe('Max results (multiple types)'),
       },
       annotations: { readOnlyHint: true, destructiveHint: false },
     },
@@ -708,6 +865,66 @@ const captureFieldsByType: Record<string, FieldSpec[]> = {
     'stage',
     'version',
   ],
+  'source-document': [
+    'originalFilename',
+    'originalFileHash',
+    'originalFileSizeBytes',
+    'originalPageCount',
+    'mimeType',
+    'extractionMethod',
+    'extractionConfidence',
+    'extractionDate',
+    'extractionTool',
+    'extractionWave',
+    'extractedMarkdownPath',
+    'preProcessing',
+    'postProcessing',
+    'pipelineVersion',
+    { from: 'docCategory', to: 'category' },
+    'subcategory',
+    'date',
+    'facility',
+    'physician',
+    { from: 'docLanguage', to: 'language' },
+    'tags',
+  ],
+  diagnosis: [
+    'conditionName',
+    'conditionNamePl',
+    'icdCode',
+    'onsetDate',
+    'firstDocumentedDate',
+    'currentStatus',
+    'bodyRegion',
+    'diagnosisConfidence',
+    'supportingEvidenceIds',
+    'notes',
+  ],
+  progression: [
+    'findingChainId',
+    'findingName',
+    'findingDomain',
+    'anatomicalLocation',
+    'progressionDate',
+    'progressionValue',
+    'numericValue',
+    'progressionUnit',
+    'direction',
+    'comparisonNote',
+    'sourceRecordId',
+    'sourceRecordType',
+  ],
+  'report-version': [
+    'reportName',
+    'reportLanguage',
+    'reportVersion',
+    'filePath',
+    'contentHash',
+    'lineCount',
+    'subsectionCount',
+    'changesSummary',
+    'changeSource',
+  ],
 };
 
 const queryFieldsByType: Record<string, FieldSpec[]> = {
@@ -742,6 +959,34 @@ const queryFieldsByType: Record<string, FieldSpec[]> = {
   ],
   'hypothesis-timeline': [{ from: 'hypothesisName', to: 'name' }],
   'research-summary': [],
+  'source-documents': [
+    'category',
+    'dateFrom',
+    'dateTo',
+    { from: 'qFacility', to: 'facility' },
+    'extractionMethod',
+    'limit',
+  ],
+  'imaging-findings': ['anatomicalLocation', 'findingType', 'imagingReportId', 'limit'],
+  diagnoses: [
+    'icd10Code',
+    { from: 'qCurrentStatus', to: 'currentStatus' },
+    { from: 'qBodyRegion', to: 'bodyRegion' },
+    'limit',
+  ],
+  progressions: [
+    'findingChainId',
+    { from: 'qFindingName', to: 'findingName' },
+    { from: 'qFindingDomain', to: 'findingDomain' },
+    'anatomicalLocation',
+    'dateFrom',
+    'dateTo',
+    'limit',
+  ],
+  'report-versions': [
+    { from: 'qReportName', to: 'reportName' },
+    { from: 'qLanguage', to: 'language' },
+  ],
 };
 
 /** Pick declared fields from flat MCP input into a typed object. */

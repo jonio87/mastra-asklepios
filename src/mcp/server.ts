@@ -6,6 +6,7 @@ import { registerAgentTools } from './tools-agents.js';
 import { registerBiomedicalTools } from './tools-biomedical.js';
 import { registerClinicalTools } from './tools-clinical.js';
 import { registerCoreTools } from './tools-core.js';
+import { registerDataLayerTools } from './tools-data-layer.js';
 import { registerResearchTools } from './tools-research.js';
 import { registerSessionTools } from './tools-session.js';
 import { registerStateTools } from './tools-state.js';
@@ -18,9 +19,9 @@ import { registerWorkflowTools } from './tools-workflows.js';
  * Asklepios MCP Server — agent-native control plane.
  *
  * Exposes the full Asklepios system as MCP primitives:
- *   - 33+ Asklepios-native tools (core, agents, workflows, state, tasks, clinical, research, validation, session, streaming)
+ *   - 38+ Asklepios-native tools (core, agents, workflows, state, tasks, clinical, research, validation, session, streaming, data-layer)
  *   - 80+ biomedical tools proxied from 8 upstream MCP servers (BioMCP, gget, BioThings, Pharmacology, OpenGenes, SynergyAge, BioContextAI, Open Targets)
- *   - 7 resources (patient data, system health, agent configs — subscribable)
+ *   - 9 resources (patient data, data completeness, provenance summary, system health, agent configs — subscribable)
  *   - 4 prompts (diagnostic workflows, case review, testing scenarios)
  *
  * Any MCP client (Claude Desktop, Cursor, Claude Code, custom QA agent)
@@ -41,7 +42,7 @@ export async function createAsklepiosMcpServer(): Promise<McpServer> {
         logging: {},
       },
       instructions:
-        'Asklepios is an AI-powered rare disease research assistant with diagnostic reasoning, multi-agent orchestration, cross-patient pattern matching, and access to 50+ biomedical databases. Use capture_clinical_data and query_clinical_data for structured clinical records, ingest_document and search_knowledge for document knowledge base, stream_asklepios for interactive chat, and bio_* tools for direct biomedical database access (PubMed, ClinVar, gnomAD, UniProt, Reactome, KEGG, STRING, DisGeNET, GTEx, Open Targets, and more).',
+        'Asklepios is an AI-powered rare disease research assistant with diagnostic reasoning, multi-agent orchestration, cross-patient pattern matching, and access to 50+ biomedical databases. Use capture_clinical_data and query_clinical_data for structured clinical records (Layer 0-5: source-documents, lab-results, consultations, imaging, diagnoses, progressions, report-versions), ingest_document and search_knowledge for document knowledge base, stream_asklepios for interactive chat, and bio_* tools for direct biomedical database access (PubMed, ClinVar, gnomAD, UniProt, Reactome, KEGG, STRING, DisGeNET, GTEx, Open Targets). Data layer tools: extract_imaging_findings (decompose text to structured findings), check_data_completeness (audit all layers), check_regeneration (detect stale reports), process_cascade (propagate changes through layers), query_provenance (trace data lineage via W3C PROV).',
     },
   );
 
@@ -56,6 +57,7 @@ export async function createAsklepiosMcpServer(): Promise<McpServer> {
   registerValidationTools(server);
   registerSessionTools(server);
   registerStreamingTools(server);
+  registerDataLayerTools(server);
 
   // Biomedical MCP bridge — proxies 80+ tools from upstream MCP servers
   await registerBiomedicalTools(server);
