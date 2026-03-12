@@ -1,37 +1,30 @@
-import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
-import { ClinicalStore } from '../storage/clinical-store.js';
+import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
+import { ClinicalStore, setClinicalStoreForTest } from '../storage/clinical-store.js';
+import { captureDataTool as _captureDataTool } from './capture-data.js';
+
+// biome-ignore lint/suspicious/noExplicitAny: tool.execute signature requires context arg we skip in tests
+const captureDataTool = _captureDataTool as any;
 
 const TEST_PATIENT = 'patient-capture-test';
 
 /**
  * Tests for the consolidated captureData tool.
- * Verifies discriminated-union routing for all 6 capture types.
+ * Verifies discriminated-union routing for all capture types.
  *
  * Uses an in-memory SQLite database for isolation.
- *
- * Strategy: import the real ClinicalStore class directly, create an
- * in-memory store, then use jest.unstable_mockModule to intercept
- * getClinicalStore() so the tool writes to our in-memory store.
- * The tool module is dynamically imported AFTER the mock is registered.
+ * Uses setClinicalStoreForTest to inject the in-memory store
+ * into the singleton used by the tool.
  */
 
 const memStore = new ClinicalStore('file::memory:?cache=shared');
 
-jest.unstable_mockModule('../storage/clinical-store.js', () => ({
-  ClinicalStore,
-  getClinicalStore: () => memStore,
-}));
-
-// biome-ignore lint/suspicious/noExplicitAny: dynamically imported in beforeAll
-let captureDataTool: any;
-
 beforeAll(async () => {
-  const mod = await import('./capture-data.js');
-  captureDataTool = mod.captureDataTool;
   await memStore.ensureInitialized();
+  setClinicalStoreForTest(memStore);
 });
 
 afterAll(async () => {
+  setClinicalStoreForTest(undefined as unknown as ClinicalStore);
   await memStore.close();
 });
 
@@ -210,6 +203,7 @@ describe('captureDataTool', () => {
         value: 2.59,
         unit: 'tys/µl',
         date: '2025-01-10',
+        source: 'ALAB',
       });
 
       expect(result.success).toBe(true);
@@ -250,6 +244,7 @@ describe('captureDataTool', () => {
         value: 'positive (329.41 U/ml)',
         unit: 'qualitative',
         date: '2025-02-01',
+        source: 'Diagnostyka',
       });
 
       expect(result.success).toBe(true);
@@ -400,6 +395,7 @@ describe('captureDataTool', () => {
           value: 1,
           unit: 'u',
           date: '2025-01-01',
+          source: 'Lab X',
           prefix: 'lab-',
         },
         {

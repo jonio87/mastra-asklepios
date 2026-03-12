@@ -22,7 +22,7 @@ describe('asklepiosAgent', () => {
 
   it('has instructions about three-layer architecture', async () => {
     const instructions = await asklepiosAgent.getInstructions();
-    expect(instructions).toContain('Three-Layer Clinical Knowledge Architecture');
+    expect(instructions).toContain('Six-Layer Inverted Pyramid Architecture');
   });
 
   it('has all required tools configured', () => {
