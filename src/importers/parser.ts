@@ -114,6 +114,7 @@ export async function discoverRecordFiles(recordsDir: string): Promise<string[]>
 async function walkDir(dir: string, results: string[]): Promise<void> {
   const entries = await readdir(dir);
   for (const entry of entries) {
+    if (entry.startsWith('.')) continue;
     const fullPath = join(dir, entry);
     const stats = await stat(fullPath);
     if (stats.isDirectory()) {

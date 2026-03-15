@@ -4,6 +4,8 @@ const config = {
   testEnvironment: 'node',
   extensionsToTreatAsEsm: ['.ts', '.tsx'],
   moduleNameMapper: {
+    // CJS-safe mock for terminology-loader (must be BEFORE .js stripper to intercept first)
+    '(.*)/terminology-loader(\\.js)?$': '<rootDir>/src/importers/__mocks__/terminology-loader.ts',
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
   transform: {

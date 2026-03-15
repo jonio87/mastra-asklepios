@@ -207,7 +207,7 @@ export class ClinicalStore {
             )`,
       `CREATE INDEX IF NOT EXISTS idx_abdominal_patient ON clinical_abdominal_reports(patient_id)`,
 
-      // ─── Layer 2B: Research Data Store ──────────────────────────────
+      // ─── Layer 2: Research Data Store (Enrichment) ───────────────────
       `CREATE TABLE IF NOT EXISTS research_findings (
                 id TEXT PRIMARY KEY,
                 patient_id TEXT NOT NULL,
@@ -298,7 +298,7 @@ export class ClinicalStore {
       `CREATE INDEX IF NOT EXISTS idx_links_finding ON hypothesis_evidence_links(finding_id)`,
       `CREATE INDEX IF NOT EXISTS idx_links_clinical ON hypothesis_evidence_links(clinical_record_id)`,
 
-      // ─── Layer 2C: Genetic Variants ─────────────────────────────────
+      // ─── Layer 1: Genetic Variants ──────────────────────────────────
       `CREATE TABLE IF NOT EXISTS genetic_variants (
                 id TEXT PRIMARY KEY,
                 patient_id TEXT NOT NULL,
@@ -373,7 +373,7 @@ export class ClinicalStore {
       `CREATE INDEX IF NOT EXISTS idx_source_docs_hash ON source_documents(original_file_hash)`,
       `CREATE INDEX IF NOT EXISTS idx_source_docs_date ON source_documents(patient_id, date)`,
 
-      // ─── Layer 2A: Structured Imaging Findings ─────────────────────────
+      // ─── Layer 1: Structured Imaging Findings ──────────────────────────
       `CREATE TABLE IF NOT EXISTS clinical_imaging_findings (
                 id TEXT PRIMARY KEY,
                 patient_id TEXT NOT NULL,
@@ -402,7 +402,7 @@ export class ClinicalStore {
       `CREATE INDEX IF NOT EXISTS idx_findings_type ON clinical_imaging_findings(patient_id, finding_type)`,
       `CREATE INDEX IF NOT EXISTS idx_findings_date ON clinical_imaging_findings(patient_id, date)`,
 
-      // ─── Layer 2A: Diagnosis Registry ──────────────────────────────────
+      // ─── Layer 1: Diagnosis Registry ───────────────────────────────────
       `CREATE TABLE IF NOT EXISTS clinical_diagnoses (
                 id TEXT PRIMARY KEY,
                 patient_id TEXT NOT NULL,
@@ -426,7 +426,7 @@ export class ClinicalStore {
       `CREATE INDEX IF NOT EXISTS idx_diagnoses_icd ON clinical_diagnoses(patient_id, icd10_code)`,
       `CREATE INDEX IF NOT EXISTS idx_diagnoses_status ON clinical_diagnoses(patient_id, current_status)`,
 
-      // ─── Layer 2A: Progression Tracking ────────────────────────────────
+      // ─── Layer 1: Progression Tracking ─────────────────────────────────
       `CREATE TABLE IF NOT EXISTS clinical_progressions (
                 id TEXT PRIMARY KEY,
                 patient_id TEXT NOT NULL,
@@ -453,7 +453,7 @@ export class ClinicalStore {
       `CREATE INDEX IF NOT EXISTS idx_progressions_domain ON clinical_progressions(patient_id, finding_domain)`,
       `CREATE INDEX IF NOT EXISTS idx_progressions_date ON clinical_progressions(patient_id, date)`,
 
-      // ─── Layer 5: Report Versions ──────────────────────────────────────
+      // ─── Layer 4: Report Versions (Deliverables) ──────────────────────
       `CREATE TABLE IF NOT EXISTS report_versions (
                 id TEXT PRIMARY KEY,
                 patient_id TEXT NOT NULL,
@@ -471,7 +471,7 @@ export class ClinicalStore {
       `CREATE INDEX IF NOT EXISTS idx_report_versions_patient ON report_versions(patient_id)`,
       `CREATE INDEX IF NOT EXISTS idx_report_versions_name ON report_versions(patient_id, report_name, language)`,
 
-      // ─── Layer 5: Report Data Integration ──────────────────────────────
+      // ─── Layer 4: Report Data Integration ──────────────────────────────
       `CREATE TABLE IF NOT EXISTS report_data_integration (
                 id TEXT PRIMARY KEY,
                 patient_id TEXT NOT NULL,
@@ -548,20 +548,434 @@ export class ClinicalStore {
         });
     }
 
-    // Migration: add content_hash column to research_findings
+    // Migration: add FHIR R4 metadata columns to all L1 clinical tables
+    const fhirTables = [
+      'clinical_lab_results',
+      'clinical_treatment_trials',
+      'clinical_consultations',
+      'clinical_contradictions',
+      'clinical_patient_reports',
+      'clinical_agent_learnings',
+      'clinical_imaging_reports',
+      'clinical_abdominal_reports',
+      'genetic_variants',
+    ];
+    for (const table of fhirTables) {
+      for (const col of ['source_document_id', 'fhir_resource_type', 'fhir_status']) {
+        await this.client.execute(`ALTER TABLE ${table} ADD COLUMN ${col} TEXT`).catch(() => {
+          /* column already exists */
+        });
+      }
+    }
+
+    // Migration: add domain-specific FHIR columns
     await this.client
-      .execute(`ALTER TABLE research_findings ADD COLUMN content_hash TEXT`)
+      .execute(`ALTER TABLE clinical_lab_results ADD COLUMN loinc_code TEXT`)
       .catch(() => {
         /* column already exists */
       });
-    // Create dedup index (after content_hash column exists)
+    await this.client
+      .execute(`ALTER TABLE clinical_lab_results ADD COLUMN value_snomed_code TEXT`)
+      .catch(() => {
+        /* column already exists */
+      });
+    await this.client
+      .execute(`ALTER TABLE clinical_consultations ADD COLUMN snomed_specialty_code TEXT`)
+      .catch(() => {
+        /* column already exists */
+      });
+    await this.client
+      .execute(`ALTER TABLE clinical_imaging_reports ADD COLUMN diagnostic_service_section TEXT`)
+      .catch(() => {
+        /* column already exists */
+      });
+    await this.client
+      .execute(`ALTER TABLE clinical_imaging_reports ADD COLUMN loinc_study_code TEXT`)
+      .catch(() => {
+        /* column already exists */
+      });
+
+    // Migration: add SNOMED CT qualitative value code for lab results
+    await this.client
+      .execute(`ALTER TABLE clinical_lab_results ADD COLUMN value_snomed_code TEXT`)
+      .catch(() => {
+        /* column already exists */
+      });
+
+    // Migration: add LOINC study/procedure codes
+    await this.client
+      .execute(`ALTER TABLE clinical_imaging_reports ADD COLUMN loinc_study_code TEXT`)
+      .catch(() => {
+        /* column already exists */
+      });
+    await this.client
+      .execute(`ALTER TABLE clinical_abdominal_reports ADD COLUMN loinc_procedure_code TEXT`)
+      .catch(() => {
+        /* column already exists */
+      });
+
+    // Migration: add SNOMED CT body site code for imaging reports
+    await this.client
+      .execute(`ALTER TABLE clinical_imaging_reports ADD COLUMN body_site_snomed_code TEXT`)
+      .catch(() => {
+        /* column already exists */
+      });
+
+    // Migration: add SNOMED CT clinical finding codes
+    await this.client
+      .execute(`ALTER TABLE clinical_consultations ADD COLUMN snomed_finding_code TEXT`)
+      .catch(() => {
+        /* column already exists */
+      });
+    await this.client
+      .execute(`ALTER TABLE clinical_diagnoses ADD COLUMN snomed_code TEXT`)
+      .catch(() => {
+        /* column already exists */
+      });
+
+    // Migration: add clinical_medications table (RxNorm-coded)
+    await this.client.execute(`
+      CREATE TABLE IF NOT EXISTS clinical_medications (
+        id TEXT PRIMARY KEY,
+        patient_id TEXT NOT NULL,
+        medication_name TEXT NOT NULL,
+        brand_name TEXT,
+        rxnorm_code TEXT,
+        dosage TEXT,
+        route TEXT,
+        frequency TEXT,
+        status TEXT NOT NULL DEFAULT 'unknown',
+        start_date TEXT,
+        end_date TEXT,
+        prescriber TEXT,
+        indication TEXT,
+        source_document_id TEXT,
+        evidence_tier TEXT,
+        validation_status TEXT,
+        source_credibility INTEGER,
+        fhir_resource_type TEXT DEFAULT 'MedicationStatement',
+        fhir_status TEXT DEFAULT 'active',
+        document_category TEXT DEFAULT 'medication',
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      )
+    `);
+    await this.client.execute(
+      `CREATE INDEX IF NOT EXISTS idx_medications_patient ON clinical_medications(patient_id)`,
+    );
+    await this.client.execute(
+      `CREATE INDEX IF NOT EXISTS idx_medications_rxnorm ON clinical_medications(rxnorm_code) WHERE rxnorm_code IS NOT NULL`,
+    );
+
+    // Migration: add genetic_variants provenance + SOTA genomic columns
+    // (source_document_id, fhir_resource_type, fhir_status already added via fhirTables loop above)
+    const geneticVariantColumns = [
+      'evidence_tier TEXT',
+      'validation_status TEXT',
+      'source_credibility INTEGER',
+      'document_category TEXT',
+      // GA4GH VRS 2.0 computed identifiers
+      'vrs_digest TEXT',
+      'vrs_allele_id TEXT',
+      // FHIR Genomics Reporting IG STU3 fields
+      'genomic_source_class TEXT',
+      'allelic_state TEXT',
+      'coding_change_type TEXT',
+      // ClinVar/ACMG clinical annotation
+      'clinical_significance TEXT',
+      'clinvar_id TEXT',
+      'clinvar_last_evaluated TEXT',
+      'review_status TEXT',
+      'gene_symbol TEXT',
+      'conditions TEXT',
+      'molecular_consequence TEXT',
+      // Pharmacogenomics (PharmGKB/CPIC)
+      'pharmgkb_level TEXT',
+      'star_allele TEXT',
+      // Population frequency
+      'global_minor_allele_freq REAL',
+    ];
+    for (const colDef of geneticVariantColumns) {
+      await this.client
+        .execute(`ALTER TABLE genetic_variants ADD COLUMN ${colDef}`)
+        .catch(() => {
+          /* column already exists */
+        });
+    }
+    // Indexes for clinical annotation queries
     await this.client
       .execute(
-        `CREATE UNIQUE INDEX IF NOT EXISTS idx_findings_dedup_hash ON research_findings(patient_id, content_hash) WHERE content_hash IS NOT NULL AND external_id IS NULL`,
+        `CREATE INDEX IF NOT EXISTS idx_variants_clinvar ON genetic_variants(clinvar_id) WHERE clinvar_id IS NOT NULL`,
+      )
+      .catch(() => {});
+    await this.client
+      .execute(
+        `CREATE INDEX IF NOT EXISTS idx_variants_gene ON genetic_variants(gene_symbol) WHERE gene_symbol IS NOT NULL`,
+      )
+      .catch(() => {});
+    await this.client
+      .execute(
+        `CREATE INDEX IF NOT EXISTS idx_variants_significance ON genetic_variants(clinical_significance) WHERE clinical_significance IS NOT NULL`,
+      )
+      .catch(() => {});
+    await this.client
+      .execute(
+        `CREATE INDEX IF NOT EXISTS idx_variants_vrs ON genetic_variants(vrs_digest) WHERE vrs_digest IS NOT NULL`,
+      )
+      .catch(() => {});
+
+    // Migration: add FK indexes on source_document_id for provenance tracing
+    for (const table of fhirTables) {
+      const shortName = table.replace('clinical_', '');
+      await this.client
+        .execute(
+          `CREATE INDEX IF NOT EXISTS idx_${shortName}_source_doc ON ${table}(source_document_id) WHERE source_document_id IS NOT NULL`,
+        )
+        .catch(() => {
+          /* index already exists */
+        });
+    }
+
+    // Migration: add Phase C tables (empty, ready for extraction)
+    await this.client
+      .execute(
+        `CREATE TABLE IF NOT EXISTS clinical_conditions (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                code TEXT NOT NULL,
+                code_system TEXT NOT NULL DEFAULT 'ICD-10',
+                display_name TEXT NOT NULL,
+                clinical_status TEXT NOT NULL,
+                verification_status TEXT NOT NULL DEFAULT 'unconfirmed',
+                onset_date TEXT,
+                abatement_date TEXT,
+                category TEXT,
+                severity TEXT,
+                notes TEXT,
+                source_document_id TEXT,
+                fhir_resource_type TEXT DEFAULT 'Condition',
+                fhir_status TEXT DEFAULT 'final',
+                document_category TEXT DEFAULT 'clinical-impression',
+                evidence_tier TEXT,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
+      )
+      .catch(() => {
+        /* table already exists */
+      });
+    await this.client
+      .execute(
+        `CREATE INDEX IF NOT EXISTS idx_conditions_patient ON clinical_conditions(patient_id)`,
       )
       .catch(() => {
         /* index already exists */
       });
+
+    await this.client
+      .execute(
+        `CREATE TABLE IF NOT EXISTS clinical_allergy_intolerances (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                substance TEXT NOT NULL,
+                reaction TEXT,
+                severity TEXT,
+                clinical_status TEXT NOT NULL DEFAULT 'active',
+                type TEXT NOT NULL DEFAULT 'allergy',
+                source_document_id TEXT,
+                fhir_resource_type TEXT DEFAULT 'AllergyIntolerance',
+                fhir_status TEXT DEFAULT 'final',
+                document_category TEXT DEFAULT 'clinical-impression',
+                evidence_tier TEXT,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
+      )
+      .catch(() => {
+        /* table already exists */
+      });
+    await this.client
+      .execute(
+        `CREATE INDEX IF NOT EXISTS idx_allergies_patient ON clinical_allergy_intolerances(patient_id)`,
+      )
+      .catch(() => {
+        /* index already exists */
+      });
+
+    await this.client
+      .execute(
+        `CREATE TABLE IF NOT EXISTS clinical_family_history (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                relationship TEXT NOT NULL,
+                condition TEXT NOT NULL,
+                onset_age TEXT,
+                deceased INTEGER,
+                source_document_id TEXT,
+                fhir_resource_type TEXT DEFAULT 'FamilyMemberHistory',
+                fhir_status TEXT DEFAULT 'final',
+                document_category TEXT DEFAULT 'clinical-impression',
+                evidence_tier TEXT,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )`,
+      )
+      .catch(() => {
+        /* table already exists */
+      });
+    await this.client
+      .execute(
+        `CREATE INDEX IF NOT EXISTS idx_family_history_patient ON clinical_family_history(patient_id)`,
+      )
+      .catch(() => {
+        /* index already exists */
+      });
+
+    // Migration: medication_changes table (L1 — temporal medication history)
+    await this.client
+      .execute(
+        `CREATE TABLE IF NOT EXISTS medication_changes (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                medication_name TEXT NOT NULL,
+                rxnorm_code TEXT,
+                change_type TEXT NOT NULL,
+                change_date TEXT,
+                previous_value TEXT,
+                new_value TEXT,
+                reason TEXT,
+                source_document_id TEXT,
+                source_consultation_id TEXT,
+                evidence_tier TEXT,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                created_at TEXT DEFAULT (datetime('now'))
+            )`,
+      )
+      .catch(() => {});
+    await this.client
+      .execute(`CREATE INDEX IF NOT EXISTS idx_med_changes_patient ON medication_changes(patient_id)`)
+      .catch(() => {});
+    await this.client
+      .execute(`CREATE INDEX IF NOT EXISTS idx_med_changes_medication ON medication_changes(medication_name)`)
+      .catch(() => {});
+    await this.client
+      .execute(`CREATE INDEX IF NOT EXISTS idx_med_changes_date ON medication_changes(change_date) WHERE change_date IS NOT NULL`)
+      .catch(() => {});
+
+    // Migration: medication_interactions table (L2 — schema only, populated via future annotation script)
+    await this.client
+      .execute(
+        `CREATE TABLE IF NOT EXISTS medication_interactions (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                medication_a_name TEXT NOT NULL,
+                medication_a_rxnorm TEXT,
+                medication_b_name TEXT NOT NULL,
+                medication_b_rxnorm TEXT,
+                severity TEXT NOT NULL,
+                interaction_type TEXT,
+                description TEXT NOT NULL,
+                clinical_consequence TEXT,
+                management TEXT,
+                source TEXT NOT NULL,
+                source_reference TEXT,
+                evidence_tier TEXT DEFAULT 'expert-opinion',
+                validation_status TEXT DEFAULT 'unvalidated',
+                source_credibility INTEGER,
+                active INTEGER DEFAULT 1,
+                created_at TEXT DEFAULT (datetime('now'))
+            )`,
+      )
+      .catch(() => {});
+    await this.client
+      .execute(`CREATE INDEX IF NOT EXISTS idx_interactions_patient ON medication_interactions(patient_id)`)
+      .catch(() => {});
+    await this.client
+      .execute(`CREATE INDEX IF NOT EXISTS idx_interactions_med_a ON medication_interactions(medication_a_name)`)
+      .catch(() => {});
+    await this.client
+      .execute(`CREATE INDEX IF NOT EXISTS idx_interactions_med_b ON medication_interactions(medication_b_name)`)
+      .catch(() => {});
+    await this.client
+      .execute(`CREATE INDEX IF NOT EXISTS idx_interactions_severity ON medication_interactions(severity)`)
+      .catch(() => {});
+
+    // Migration: medication_adherence table (L2 — FHIR R5 aligned, populated from clinical notes or patient reports)
+    await this.client
+      .execute(
+        `CREATE TABLE IF NOT EXISTS medication_adherence (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                medication_name TEXT NOT NULL,
+                rxnorm_code TEXT,
+                observation_date TEXT,
+                adherence_code TEXT NOT NULL,
+                reporter TEXT,
+                notes TEXT,
+                source_document_id TEXT,
+                evidence_tier TEXT,
+                validation_status TEXT,
+                source_credibility INTEGER,
+                created_at TEXT DEFAULT (datetime('now'))
+            )`,
+      )
+      .catch(() => {});
+    await this.client
+      .execute(`CREATE INDEX IF NOT EXISTS idx_adherence_patient ON medication_adherence(patient_id)`)
+      .catch(() => {});
+    await this.client
+      .execute(`CREATE INDEX IF NOT EXISTS idx_adherence_medication ON medication_adherence(medication_name)`)
+      .catch(() => {});
+    await this.client
+      .execute(`CREATE INDEX IF NOT EXISTS idx_adherence_date ON medication_adherence(observation_date) WHERE observation_date IS NOT NULL`)
+      .catch(() => {});
+
+    // Migration: add rxnorm_code to clinical_treatment_trials
+    await this.client
+      .execute(`ALTER TABLE clinical_treatment_trials ADD COLUMN rxnorm_code TEXT`)
+      .catch(() => {});
+    await this.client
+      .execute(`CREATE INDEX IF NOT EXISTS idx_treatments_rxnorm ON clinical_treatment_trials(rxnorm_code) WHERE rxnorm_code IS NOT NULL`)
+      .catch(() => {});
+
+    // Migration: add content_hash to source_documents
+    await this.client
+      .execute(`ALTER TABLE source_documents ADD COLUMN content_hash TEXT`)
+      .catch(() => {});
+
+    // Migration: add evidence_tier and validation_status to brain_patterns
+    await this.client
+      .execute(`ALTER TABLE brain_patterns ADD COLUMN evidence_tier TEXT DEFAULT 'T3-ai-inferred'`)
+      .catch(() => {});
+    await this.client
+      .execute(`ALTER TABLE brain_patterns ADD COLUMN validation_status TEXT DEFAULT 'unvalidated'`)
+      .catch(() => {});
+
+    // Migration: add updated_at to all L1 clinical tables (provenance tracking)
+    const tablesNeedingUpdatedAt = [
+      'clinical_lab_results',
+      'clinical_consultations',
+      'clinical_imaging_reports',
+      'clinical_abdominal_reports',
+      'clinical_patient_reports',
+      'clinical_treatment_trials',
+      'clinical_contradictions',
+      'clinical_agent_learnings',
+      'clinical_allergy_intolerances',
+      'clinical_conditions',
+      'clinical_family_history',
+      'clinical_imaging_findings',
+      'clinical_progressions',
+    ];
+    for (const table of tablesNeedingUpdatedAt) {
+      await this.client
+        .execute(`ALTER TABLE ${table} ADD COLUMN updated_at TEXT DEFAULT (datetime('now'))`)
+        .catch(() => {});
+    }
 
     logger.debug('ClinicalStore migration complete');
   }
@@ -605,8 +1019,10 @@ export class ClinicalStore {
     return {
       sql: `INSERT OR REPLACE INTO clinical_lab_results
                 (id, patient_id, test_name, value, unit, reference_range, flag, date, source, notes,
-                 evidence_tier, validation_status, source_credibility)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 evidence_tier, validation_status, source_credibility,
+                 source_document_id, fhir_resource_type, fhir_status, document_category,
+                 loinc_code, value_snomed_code)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         lab.id,
         lab.patientId,
@@ -621,8 +1037,33 @@ export class ClinicalStore {
         lab.evidenceTier ?? null,
         lab.validationStatus ?? null,
         lab.sourceCredibility ?? null,
+        lab.sourceDocumentId ?? null,
+        lab.fhirResourceType ?? null,
+        lab.fhirStatus ?? null,
+        lab.documentCategory ?? null,
+        lab.loincCode ?? null,
+        lab.valueSnomedCode ?? null,
       ],
     };
+  }
+
+  async updateLabSnomedCode(labId: string, snomedCode: string): Promise<void> {
+    await this.ensureInitialized();
+    await this.client.execute({
+      sql: `UPDATE clinical_lab_results SET value_snomed_code = ? WHERE id = ?`,
+      args: [snomedCode, labId],
+    });
+  }
+
+  async updateConsultationSnomedFinding(
+    consultationId: string,
+    snomedCode: string,
+  ): Promise<void> {
+    await this.ensureInitialized();
+    await this.client.execute({
+      sql: `UPDATE clinical_consultations SET snomed_finding_code = ? WHERE id = ?`,
+      args: [snomedCode, consultationId],
+    });
   }
 
   /**
@@ -734,7 +1175,10 @@ export class ClinicalStore {
       date: String(row['date']),
       source: row['source'] ? String(row['source']) : undefined,
       notes: row['notes'] ? String(row['notes']) : undefined,
+      loincCode: row['loinc_code'] ? String(row['loinc_code']) : undefined,
+      valueSnomedCode: row['value_snomed_code'] ? String(row['value_snomed_code']) : undefined,
       ...mapProvenance(row as Record<string, unknown>),
+      ...mapFhirMetadata(row as Record<string, unknown>),
     }));
 
     await this.warnIfIdMismatch(params.patientId, 'clinical_lab_results', labs.length);
@@ -787,18 +1231,21 @@ export class ClinicalStore {
 
   // ─── Treatment Trials ─────────────────────────────────────────────────
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: flat INSERT with many nullable FHIR columns
   async addTreatmentTrial(trial: TreatmentTrial): Promise<void> {
     await this.ensureInitialized();
     await this.client.execute({
       sql: `INSERT OR REPLACE INTO clinical_treatment_trials
-                (id, patient_id, medication, drug_class, indication, start_date, end_date,
+                (id, patient_id, medication, rxnorm_code, drug_class, indication, start_date, end_date,
                  dosage, efficacy, side_effects, reason_discontinued, adequate_trial,
-                 evidence_tier, validation_status, source_credibility, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 evidence_tier, validation_status, source_credibility, source,
+                 source_document_id, fhir_resource_type, fhir_status, document_category)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         trial.id,
         trial.patientId,
         trial.medication,
+        trial.rxnormCode ?? null,
         trial.drugClass ?? null,
         trial.indication ?? null,
         trial.startDate ?? null,
@@ -812,6 +1259,10 @@ export class ClinicalStore {
         trial.validationStatus ?? null,
         trial.sourceCredibility ?? null,
         trial.source ?? null,
+        trial.sourceDocumentId ?? null,
+        trial.fhirResourceType ?? null,
+        trial.fhirStatus ?? null,
+        trial.documentCategory ?? null,
       ],
     });
   }
@@ -866,8 +1317,10 @@ export class ClinicalStore {
       sql: `INSERT OR REPLACE INTO clinical_consultations
                 (id, patient_id, provider, specialty, institution, date, reason, findings,
                  conclusions, conclusions_status, recommendations,
-                 evidence_tier, validation_status, source_credibility, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 evidence_tier, validation_status, source_credibility, source,
+                 source_document_id, fhir_resource_type, fhir_status, document_category,
+                 snomed_specialty_code, snomed_finding_code)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         consultation.id,
         consultation.patientId,
@@ -884,6 +1337,12 @@ export class ClinicalStore {
         consultation.validationStatus ?? null,
         consultation.sourceCredibility ?? null,
         consultation.source ?? null,
+        consultation.sourceDocumentId ?? null,
+        consultation.fhirResourceType ?? null,
+        consultation.fhirStatus ?? null,
+        consultation.documentCategory ?? null,
+        consultation.snomedSpecialtyCode ?? null,
+        consultation.snomedFindingCode ?? null,
       ],
     });
   }
@@ -925,7 +1384,46 @@ export class ClinicalStore {
       recommendations: row['recommendations']
         ? (JSON.parse(String(row['recommendations'])) as string[])
         : undefined,
+      snomedSpecialtyCode: row['snomed_specialty_code']
+        ? String(row['snomed_specialty_code'])
+        : undefined,
+      snomedFindingCode: row['snomed_finding_code']
+        ? String(row['snomed_finding_code'])
+        : undefined,
       ...mapProvenance(row as Record<string, unknown>),
+      ...mapFhirMetadata(row as Record<string, unknown>),
+    }));
+  }
+
+  async queryConsultationsMissingSnomedFinding(): Promise<Consultation[]> {
+    await this.ensureInitialized();
+    const result = await this.client.execute({
+      sql: `SELECT * FROM clinical_consultations WHERE snomed_finding_code IS NULL ORDER BY date DESC`,
+      args: [],
+    });
+
+    return result.rows.map((row) => ({
+      id: String(row['id']),
+      patientId: String(row['patient_id']),
+      provider: String(row['provider']),
+      specialty: String(row['specialty']),
+      institution: row['institution'] ? String(row['institution']) : undefined,
+      date: String(row['date']),
+      reason: row['reason'] ? String(row['reason']) : undefined,
+      findings: row['findings'] ? String(row['findings']) : undefined,
+      conclusions: row['conclusions'] ? String(row['conclusions']) : undefined,
+      conclusionsStatus: String(row['conclusions_status']) as Consultation['conclusionsStatus'],
+      recommendations: row['recommendations']
+        ? (JSON.parse(String(row['recommendations'])) as string[])
+        : undefined,
+      snomedSpecialtyCode: row['snomed_specialty_code']
+        ? String(row['snomed_specialty_code'])
+        : undefined,
+      snomedFindingCode: row['snomed_finding_code']
+        ? String(row['snomed_finding_code'])
+        : undefined,
+      ...mapProvenance(row as Record<string, unknown>),
+      ...mapFhirMetadata(row as Record<string, unknown>),
     }));
   }
 
@@ -946,6 +1444,422 @@ export class ClinicalStore {
     return result.rows.length > 0 ? String(result.rows[0]?.['id']) : null;
   }
 
+  // ─── Medications ─────────────────────────────────────────────────────
+
+  async addMedication(med: import('../schemas/medication.js').Medication): Promise<void> {
+    await this.ensureInitialized();
+    await this.client.execute({
+      sql: `INSERT OR REPLACE INTO clinical_medications
+                (id, patient_id, medication_name, brand_name, rxnorm_code,
+                 dosage, route, frequency, status, start_date, end_date,
+                 prescriber, indication, source_document_id,
+                 evidence_tier, validation_status, source_credibility,
+                 fhir_resource_type, fhir_status, document_category)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        med.id,
+        med.patientId,
+        med.medicationName,
+        med.brandName ?? null,
+        med.rxnormCode ?? null,
+        med.dosage ?? null,
+        med.route ?? null,
+        med.frequency ?? null,
+        med.status,
+        med.startDate ?? null,
+        med.endDate ?? null,
+        med.prescriber ?? null,
+        med.indication ?? null,
+        med.sourceDocumentId ?? null,
+        med.evidenceTier ?? null,
+        med.validationStatus ?? null,
+        med.sourceCredibility ?? null,
+        med.fhirResourceType ?? 'MedicationStatement',
+        med.fhirStatus ?? 'active',
+        med.documentCategory ?? 'medication',
+      ],
+    });
+  }
+
+  async queryMedications(params: {
+    patientId: string;
+    status?: string;
+  }): Promise<import('../schemas/medication.js').Medication[]> {
+    await this.ensureInitialized();
+    const conditions = ['patient_id = ?'];
+    const args: (string | null)[] = [params.patientId];
+
+    if (params.status) {
+      conditions.push('status = ?');
+      args.push(params.status);
+    }
+
+    const result = await this.client.execute({
+      sql: `SELECT * FROM clinical_medications WHERE ${conditions.join(' AND ')} ORDER BY medication_name`,
+      args,
+    });
+
+    return result.rows.map((row) => ({
+      id: String(row['id']),
+      patientId: String(row['patient_id']),
+      medicationName: String(row['medication_name']),
+      brandName: row['brand_name'] ? String(row['brand_name']) : undefined,
+      rxnormCode: row['rxnorm_code'] ? String(row['rxnorm_code']) : undefined,
+      dosage: row['dosage'] ? String(row['dosage']) : undefined,
+      route: row['route'] as import('../schemas/medication.js').Medication['route'],
+      frequency: row['frequency'] ? String(row['frequency']) : undefined,
+      status: String(row['status']) as import('../schemas/medication.js').Medication['status'],
+      startDate: row['start_date'] ? String(row['start_date']) : undefined,
+      endDate: row['end_date'] ? String(row['end_date']) : undefined,
+      prescriber: row['prescriber'] ? String(row['prescriber']) : undefined,
+      indication: row['indication'] ? String(row['indication']) : undefined,
+      sourceDocumentId: row['source_document_id'] ? String(row['source_document_id']) : undefined,
+      ...mapProvenance(row as Record<string, unknown>),
+      ...mapFhirMetadata(row as Record<string, unknown>),
+    }));
+  }
+
+  // ─── Medication Changes ──────────────────────────────────────────────
+
+  async addMedicationChange(change: {
+    id: string;
+    patientId: string;
+    medicationName: string;
+    rxnormCode?: string;
+    changeType: string;
+    changeDate?: string;
+    previousValue?: string;
+    newValue?: string;
+    reason?: string;
+    sourceDocumentId?: string;
+    sourceConsultationId?: string;
+    evidenceTier?: string;
+    validationStatus?: string;
+    sourceCredibility?: number;
+  }): Promise<void> {
+    await this.ensureInitialized();
+    await this.client.execute({
+      sql: `INSERT OR REPLACE INTO medication_changes
+                (id, patient_id, medication_name, rxnorm_code, change_type, change_date,
+                 previous_value, new_value, reason, source_document_id, source_consultation_id,
+                 evidence_tier, validation_status, source_credibility)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        change.id,
+        change.patientId,
+        change.medicationName,
+        change.rxnormCode ?? null,
+        change.changeType,
+        change.changeDate ?? null,
+        change.previousValue ?? null,
+        change.newValue ?? null,
+        change.reason ?? null,
+        change.sourceDocumentId ?? null,
+        change.sourceConsultationId ?? null,
+        change.evidenceTier ?? null,
+        change.validationStatus ?? null,
+        change.sourceCredibility ?? null,
+      ],
+    });
+  }
+
+  async queryMedicationChanges(params: {
+    patientId: string;
+    medicationName?: string;
+  }): Promise<Array<{
+    id: string;
+    patientId: string;
+    medicationName: string;
+    rxnormCode: string | undefined;
+    changeType: string;
+    changeDate: string | undefined;
+    previousValue: string | undefined;
+    newValue: string | undefined;
+    reason: string | undefined;
+    sourceDocumentId: string | undefined;
+    sourceConsultationId: string | undefined;
+  }>> {
+    await this.ensureInitialized();
+    const conditions = ['patient_id = ?'];
+    const args: (string | null)[] = [params.patientId];
+
+    if (params.medicationName) {
+      conditions.push('medication_name = ?');
+      args.push(params.medicationName);
+    }
+
+    const result = await this.client.execute({
+      sql: `SELECT * FROM medication_changes WHERE ${conditions.join(' AND ')} ORDER BY change_date ASC`,
+      args,
+    });
+
+    return result.rows.map((row) => ({
+      id: String(row['id']),
+      patientId: String(row['patient_id']),
+      medicationName: String(row['medication_name']),
+      rxnormCode: row['rxnorm_code'] ? String(row['rxnorm_code']) : undefined,
+      changeType: String(row['change_type']),
+      changeDate: row['change_date'] ? String(row['change_date']) : undefined,
+      previousValue: row['previous_value'] ? String(row['previous_value']) : undefined,
+      newValue: row['new_value'] ? String(row['new_value']) : undefined,
+      reason: row['reason'] ? String(row['reason']) : undefined,
+      sourceDocumentId: row['source_document_id'] ? String(row['source_document_id']) : undefined,
+      sourceConsultationId: row['source_consultation_id'] ? String(row['source_consultation_id']) : undefined,
+    }));
+  }
+
+  // ─── Medication Interactions ────────────────────────────────────────
+
+  async addMedicationInteraction(interaction: {
+    id: string;
+    patientId: string;
+    medicationAName: string;
+    medicationARxnorm?: string;
+    medicationBName: string;
+    medicationBRxnorm?: string;
+    severity: string;
+    interactionType?: string;
+    description: string;
+    clinicalConsequence?: string;
+    management?: string;
+    source: string;
+    sourceReference?: string;
+    evidenceTier?: string;
+    validationStatus?: string;
+    sourceCredibility?: number;
+    active?: boolean;
+  }): Promise<void> {
+    await this.ensureInitialized();
+    await this.client.execute({
+      sql: `INSERT OR REPLACE INTO medication_interactions
+                (id, patient_id, medication_a_name, medication_a_rxnorm,
+                 medication_b_name, medication_b_rxnorm, severity, interaction_type,
+                 description, clinical_consequence, management, source, source_reference,
+                 evidence_tier, validation_status, source_credibility, active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        interaction.id,
+        interaction.patientId,
+        interaction.medicationAName,
+        interaction.medicationARxnorm ?? null,
+        interaction.medicationBName,
+        interaction.medicationBRxnorm ?? null,
+        interaction.severity,
+        interaction.interactionType ?? null,
+        interaction.description,
+        interaction.clinicalConsequence ?? null,
+        interaction.management ?? null,
+        interaction.source,
+        interaction.sourceReference ?? null,
+        interaction.evidenceTier ?? 'expert-opinion',
+        interaction.validationStatus ?? 'unvalidated',
+        interaction.sourceCredibility ?? null,
+        interaction.active === false ? 0 : 1,
+      ],
+    });
+  }
+
+  async queryMedicationInteractions(params: {
+    patientId: string;
+    medicationName?: string;
+    severity?: string;
+    activeOnly?: boolean;
+  }): Promise<Array<{
+    id: string;
+    patientId: string;
+    medicationAName: string;
+    medicationARxnorm: string | undefined;
+    medicationBName: string;
+    medicationBRxnorm: string | undefined;
+    severity: string;
+    interactionType: string | undefined;
+    description: string;
+    clinicalConsequence: string | undefined;
+    management: string | undefined;
+    source: string;
+    active: boolean;
+  }>> {
+    await this.ensureInitialized();
+    const conditions = ['patient_id = ?'];
+    const args: (string | number | null)[] = [params.patientId];
+
+    if (params.medicationName) {
+      conditions.push('(medication_a_name = ? OR medication_b_name = ?)');
+      args.push(params.medicationName, params.medicationName);
+    }
+    if (params.severity) {
+      conditions.push('severity = ?');
+      args.push(params.severity);
+    }
+    if (params.activeOnly) {
+      conditions.push('active = 1');
+    }
+
+    const result = await this.client.execute({
+      sql: `SELECT * FROM medication_interactions WHERE ${conditions.join(' AND ')} ORDER BY severity DESC`,
+      args,
+    });
+
+    return result.rows.map((row) => ({
+      id: String(row['id']),
+      patientId: String(row['patient_id']),
+      medicationAName: String(row['medication_a_name']),
+      medicationARxnorm: row['medication_a_rxnorm'] ? String(row['medication_a_rxnorm']) : undefined,
+      medicationBName: String(row['medication_b_name']),
+      medicationBRxnorm: row['medication_b_rxnorm'] ? String(row['medication_b_rxnorm']) : undefined,
+      severity: String(row['severity']),
+      interactionType: row['interaction_type'] ? String(row['interaction_type']) : undefined,
+      description: String(row['description']),
+      clinicalConsequence: row['clinical_consequence'] ? String(row['clinical_consequence']) : undefined,
+      management: row['management'] ? String(row['management']) : undefined,
+      source: String(row['source']),
+      active: row['active'] === 1,
+    }));
+  }
+
+  // ─── Medication Adherence ───────────────────────────────────────────
+
+  async addAdherenceObservation(observation: {
+    id: string;
+    patientId: string;
+    medicationName: string;
+    rxnormCode?: string;
+    observationDate?: string;
+    adherenceCode: string;
+    reporter?: string;
+    notes?: string;
+    sourceDocumentId?: string;
+    evidenceTier?: string;
+    validationStatus?: string;
+    sourceCredibility?: number;
+  }): Promise<void> {
+    await this.ensureInitialized();
+    await this.client.execute({
+      sql: `INSERT OR REPLACE INTO medication_adherence
+                (id, patient_id, medication_name, rxnorm_code, observation_date,
+                 adherence_code, reporter, notes, source_document_id,
+                 evidence_tier, validation_status, source_credibility)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        observation.id,
+        observation.patientId,
+        observation.medicationName,
+        observation.rxnormCode ?? null,
+        observation.observationDate ?? null,
+        observation.adherenceCode,
+        observation.reporter ?? null,
+        observation.notes ?? null,
+        observation.sourceDocumentId ?? null,
+        observation.evidenceTier ?? null,
+        observation.validationStatus ?? null,
+        observation.sourceCredibility ?? null,
+      ],
+    });
+  }
+
+  async queryAdherenceObservations(params: {
+    patientId: string;
+    medicationName?: string;
+  }): Promise<Array<{
+    id: string;
+    patientId: string;
+    medicationName: string;
+    rxnormCode: string | undefined;
+    observationDate: string | undefined;
+    adherenceCode: string;
+    reporter: string | undefined;
+    notes: string | undefined;
+    sourceDocumentId: string | undefined;
+  }>> {
+    await this.ensureInitialized();
+    const conditions = ['patient_id = ?'];
+    const args: (string | null)[] = [params.patientId];
+
+    if (params.medicationName) {
+      conditions.push('medication_name = ?');
+      args.push(params.medicationName);
+    }
+
+    const result = await this.client.execute({
+      sql: `SELECT * FROM medication_adherence WHERE ${conditions.join(' AND ')} ORDER BY observation_date ASC`,
+      args,
+    });
+
+    return result.rows.map((row) => ({
+      id: String(row['id']),
+      patientId: String(row['patient_id']),
+      medicationName: String(row['medication_name']),
+      rxnormCode: row['rxnorm_code'] ? String(row['rxnorm_code']) : undefined,
+      observationDate: row['observation_date'] ? String(row['observation_date']) : undefined,
+      adherenceCode: String(row['adherence_code']),
+      reporter: row['reporter'] ? String(row['reporter']) : undefined,
+      notes: row['notes'] ? String(row['notes']) : undefined,
+      sourceDocumentId: row['source_document_id'] ? String(row['source_document_id']) : undefined,
+    }));
+  }
+
+  // ─── Medication Timeline (cross-table UNION query) ────────────────────
+
+  async queryMedicationTimeline(params: {
+    patientId: string;
+    medicationName?: string;
+    rxnormCode?: string;
+  }): Promise<Array<import('../schemas/medication.js').MedicationTimelineEntry>> {
+    await this.ensureInitialized();
+
+    const medFilter = params.medicationName
+      ? ` AND medication_name = '${params.medicationName.replace(/'/g, "''")}'`
+      : params.rxnormCode
+        ? ` AND rxnorm_code = '${params.rxnormCode.replace(/'/g, "''")}'`
+        : '';
+
+    const trialMedFilter = params.medicationName
+      ? ` AND medication = '${params.medicationName.replace(/'/g, "''")}'`
+      : params.rxnormCode
+        ? ` AND rxnorm_code = '${params.rxnormCode.replace(/'/g, "''")}'`
+        : '';
+
+    const sql = `
+      SELECT change_date AS date, change_type AS event_type, medication_name, rxnorm_code,
+             COALESCE(previous_value || ' → ' || new_value, new_value, previous_value, change_type) AS details,
+             source_document_id
+      FROM medication_changes
+      WHERE patient_id = ?${medFilter}
+
+      UNION ALL
+
+      SELECT start_date AS date, 'trial_outcome' AS event_type, medication AS medication_name, rxnorm_code,
+             'Efficacy: ' || efficacy || COALESCE(' | Dosage: ' || dosage, '') || COALESCE(' | Reason discontinued: ' || reason_discontinued, '') AS details,
+             source_document_id
+      FROM clinical_treatment_trials
+      WHERE patient_id = ?${trialMedFilter}
+
+      UNION ALL
+
+      SELECT observation_date AS date, 'adherence_observation' AS event_type, medication_name, rxnorm_code,
+             adherence_code || COALESCE(' (' || reporter || ')', '') || COALESCE(': ' || notes, '') AS details,
+             source_document_id
+      FROM medication_adherence
+      WHERE patient_id = ?${medFilter}
+
+      ORDER BY date ASC NULLS LAST
+    `;
+
+    const result = await this.client.execute({
+      sql,
+      args: [params.patientId, params.patientId, params.patientId],
+    });
+
+    return result.rows.map((row) => ({
+      date: row['date'] ? String(row['date']) : null,
+      eventType: String(row['event_type']),
+      medicationName: String(row['medication_name']),
+      rxnormCode: row['rxnorm_code'] ? String(row['rxnorm_code']) : undefined,
+      details: String(row['details']),
+      sourceDocumentId: row['source_document_id'] ? String(row['source_document_id']) : undefined,
+    }));
+  }
+
   // ─── Contradictions ───────────────────────────────────────────────────
 
   async addContradiction(contradiction: Contradiction): Promise<void> {
@@ -955,8 +1869,9 @@ export class ClinicalStore {
                 (id, patient_id, finding1, finding1_date, finding1_method,
                  finding2, finding2_date, finding2_method,
                  resolution_status, resolution_plan, diagnostic_impact,
-                 evidence_tier, validation_status, source_credibility, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 evidence_tier, validation_status, source_credibility, source,
+                 source_document_id, fhir_resource_type, fhir_status, document_category)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         contradiction.id,
         contradiction.patientId,
@@ -973,6 +1888,10 @@ export class ClinicalStore {
         contradiction.validationStatus ?? null,
         contradiction.sourceCredibility ?? null,
         contradiction.source ?? null,
+        contradiction.sourceDocumentId ?? null,
+        contradiction.fhirResourceType ?? null,
+        contradiction.fhirStatus ?? null,
+        contradiction.documentCategory ?? null,
       ],
     });
   }
@@ -1008,6 +1927,7 @@ export class ClinicalStore {
       resolutionPlan: row['resolution_plan'] ? String(row['resolution_plan']) : undefined,
       diagnosticImpact: row['diagnostic_impact'] ? String(row['diagnostic_impact']) : undefined,
       ...mapProvenance(row as Record<string, unknown>),
+      ...mapFhirMetadata(row as Record<string, unknown>),
     }));
   }
 
@@ -1034,8 +1954,9 @@ export class ClinicalStore {
     await this.client.execute({
       sql: `INSERT OR REPLACE INTO clinical_patient_reports
                 (id, patient_id, date, type, content, severity, extracted_insights,
-                 evidence_tier, validation_status, source_credibility, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 evidence_tier, validation_status, source_credibility, source,
+                 source_document_id, fhir_resource_type, fhir_status, document_category)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         report.id,
         report.patientId,
@@ -1048,6 +1969,10 @@ export class ClinicalStore {
         report.validationStatus ?? null,
         report.sourceCredibility ?? null,
         report.source ?? null,
+        report.sourceDocumentId ?? null,
+        report.fhirResourceType ?? null,
+        report.fhirStatus ?? null,
+        report.documentCategory ?? null,
       ],
     });
   }
@@ -1090,7 +2015,9 @@ export class ClinicalStore {
       extractedInsights: row['extracted_insights']
         ? (JSON.parse(String(row['extracted_insights'])) as string[])
         : undefined,
+      source: row['source'] ? String(row['source']) : undefined,
       ...mapProvenance(row as Record<string, unknown>),
+      ...mapFhirMetadata(row as Record<string, unknown>),
     }));
   }
 
@@ -1117,8 +2044,9 @@ export class ClinicalStore {
     await this.client.execute({
       sql: `INSERT OR REPLACE INTO clinical_agent_learnings
                 (id, patient_id, date, category, content, confidence, related_hypotheses,
-                 evidence_tier, validation_status, source_credibility, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 evidence_tier, validation_status, source_credibility, source,
+                 source_document_id, fhir_resource_type, fhir_status, document_category)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         learning.id,
         learning.patientId,
@@ -1131,6 +2059,10 @@ export class ClinicalStore {
         learning.validationStatus ?? null,
         learning.sourceCredibility ?? null,
         learning.source ?? null,
+        learning.sourceDocumentId ?? null,
+        learning.fhirResourceType ?? null,
+        learning.fhirStatus ?? null,
+        learning.documentCategory ?? null,
       ],
     });
   }
@@ -1161,6 +2093,7 @@ export class ClinicalStore {
         ? (JSON.parse(String(row['related_hypotheses'])) as string[])
         : undefined,
       ...mapProvenance(row as Record<string, unknown>),
+      ...mapFhirMetadata(row as Record<string, unknown>),
     }));
   }
 
@@ -1188,8 +2121,10 @@ export class ClinicalStore {
       sql: `INSERT OR REPLACE INTO clinical_imaging_reports
                 (id, patient_id, modality, body_region, date, facility, physician,
                  technique, findings, impression, comparison, source,
-                 evidence_tier, validation_status, source_credibility)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 evidence_tier, validation_status, source_credibility,
+                 source_document_id, fhir_resource_type, fhir_status, document_category,
+                 diagnostic_service_section, loinc_study_code, body_site_snomed_code)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         report.id,
         report.patientId,
@@ -1206,6 +2141,13 @@ export class ClinicalStore {
         report.evidenceTier ?? null,
         report.validationStatus ?? null,
         report.sourceCredibility ?? null,
+        report.sourceDocumentId ?? null,
+        report.fhirResourceType ?? null,
+        report.fhirStatus ?? null,
+        report.documentCategory ?? null,
+        report.diagnosticServiceSection ?? null,
+        report.loincStudyCode ?? null,
+        report.bodySiteSnomedCode ?? null,
       ],
     });
   }
@@ -1240,8 +2182,10 @@ export class ClinicalStore {
       sql: `INSERT OR REPLACE INTO clinical_abdominal_reports
                 (id, patient_id, procedure_type, date, facility, physician,
                  findings, conclusions, source,
-                 evidence_tier, validation_status, source_credibility)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 evidence_tier, validation_status, source_credibility,
+                 source_document_id, fhir_resource_type, fhir_status, document_category,
+                 loinc_procedure_code)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         report.id,
         report.patientId,
@@ -1255,6 +2199,11 @@ export class ClinicalStore {
         report.evidenceTier ?? null,
         report.validationStatus ?? null,
         report.sourceCredibility ?? null,
+        report.sourceDocumentId ?? null,
+        report.fhirResourceType ?? null,
+        report.fhirStatus ?? null,
+        report.documentCategory ?? null,
+        report.loincProcedureCode ?? null,
       ],
     });
   }
@@ -2098,8 +3047,16 @@ export class ClinicalStore {
     try {
       await this.client.execute({
         sql: `INSERT INTO genetic_variants
-              (id, patient_id, rsid, chromosome, position, genotype, source, source_version, reference_genome, import_date, raw_line)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              (id, patient_id, rsid, chromosome, position, genotype, source, source_version, reference_genome, import_date, raw_line,
+               vrs_digest, vrs_allele_id, genomic_source_class, allelic_state, coding_change_type,
+               clinical_significance, clinvar_id, clinvar_last_evaluated, review_status, gene_symbol, conditions, molecular_consequence,
+               pharmgkb_level, star_allele, global_minor_allele_freq,
+               source_document_id, evidence_tier, validation_status, source_credibility, fhir_resource_type, fhir_status, document_category)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                      ?, ?, ?, ?, ?,
+                      ?, ?, ?, ?, ?, ?, ?,
+                      ?, ?, ?,
+                      ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           variant.id,
           variant.patientId,
@@ -2112,6 +3069,34 @@ export class ClinicalStore {
           variant.referenceGenome,
           variant.importDate,
           variant.rawLine ?? null,
+          // GA4GH VRS 2.0
+          variant.vrsDigest ?? null,
+          variant.vrsAlleleId ?? null,
+          // FHIR Genomics Reporting IG
+          variant.genomicSourceClass ?? null,
+          variant.allelicState ?? null,
+          variant.codingChangeType ?? null,
+          // ClinVar/ACMG
+          variant.clinicalSignificance ?? null,
+          variant.clinvarId ?? null,
+          variant.clinvarLastEvaluated ?? null,
+          variant.reviewStatus ?? null,
+          variant.geneSymbol ?? null,
+          variant.conditions ?? null,
+          variant.molecularConsequence ?? null,
+          // Pharmacogenomics
+          variant.pharmgkbLevel ?? null,
+          variant.starAllele ?? null,
+          // Population frequency
+          variant.globalMinorAlleleFreq ?? null,
+          // Provenance + FHIR
+          variant.sourceDocumentId ?? null,
+          variant.evidenceTier ?? null,
+          variant.validationStatus ?? null,
+          variant.sourceCredibility ?? null,
+          variant.fhirResourceType ?? null,
+          variant.fhirStatus ?? null,
+          variant.documentCategory ?? null,
         ],
       });
       return { id: variant.id, duplicate: false };
@@ -2131,8 +3116,16 @@ export class ClinicalStore {
 
     const stmts = variants.map((v) => ({
       sql: `INSERT OR IGNORE INTO genetic_variants
-            (id, patient_id, rsid, chromosome, position, genotype, source, source_version, reference_genome, import_date, raw_line)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (id, patient_id, rsid, chromosome, position, genotype, source, source_version, reference_genome, import_date, raw_line,
+             vrs_digest, vrs_allele_id, genomic_source_class, allelic_state, coding_change_type,
+             clinical_significance, clinvar_id, clinvar_last_evaluated, review_status, gene_symbol, conditions, molecular_consequence,
+             pharmgkb_level, star_allele, global_minor_allele_freq,
+             source_document_id, evidence_tier, validation_status, source_credibility, fhir_resource_type, fhir_status, document_category)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         v.id,
         v.patientId,
@@ -2145,6 +3138,34 @@ export class ClinicalStore {
         v.referenceGenome,
         v.importDate,
         v.rawLine ?? null,
+        // GA4GH VRS 2.0
+        v.vrsDigest ?? null,
+        v.vrsAlleleId ?? null,
+        // FHIR Genomics Reporting IG
+        v.genomicSourceClass ?? null,
+        v.allelicState ?? null,
+        v.codingChangeType ?? null,
+        // ClinVar/ACMG
+        v.clinicalSignificance ?? null,
+        v.clinvarId ?? null,
+        v.clinvarLastEvaluated ?? null,
+        v.reviewStatus ?? null,
+        v.geneSymbol ?? null,
+        v.conditions ?? null,
+        v.molecularConsequence ?? null,
+        // Pharmacogenomics
+        v.pharmgkbLevel ?? null,
+        v.starAllele ?? null,
+        // Population frequency
+        v.globalMinorAlleleFreq ?? null,
+        // Provenance + FHIR
+        v.sourceDocumentId ?? null,
+        v.evidenceTier ?? null,
+        v.validationStatus ?? null,
+        v.sourceCredibility ?? null,
+        v.fhirResourceType ?? null,
+        v.fhirStatus ?? null,
+        v.documentCategory ?? null,
       ] as InValue[],
     }));
 
@@ -2189,6 +3210,22 @@ export class ClinicalStore {
     if (params.excludeNoCalls) {
       conditions.push("genotype != '--'");
     }
+    // Annotation filters (SOTA genomic queries)
+    if (params.clinicalSignificance) {
+      conditions.push('clinical_significance = ?');
+      args.push(params.clinicalSignificance);
+    }
+    if (params.geneSymbol) {
+      conditions.push('gene_symbol = ?');
+      args.push(params.geneSymbol);
+    }
+    if (params.hasAnnotation) {
+      conditions.push('(clinical_significance IS NOT NULL OR gene_symbol IS NOT NULL OR clinvar_id IS NOT NULL)');
+    }
+    if (params.pharmgkbLevel) {
+      conditions.push('pharmgkb_level = ?');
+      args.push(params.pharmgkbLevel);
+    }
 
     const limit = params.limit ?? 100;
     const offset = params.offset ?? 0;
@@ -2222,6 +3259,73 @@ export class ClinicalStore {
     return mapRowToGeneticVariant(row as Record<string, unknown>);
   }
 
+  /**
+   * Query pharmacogenomically relevant variants (PharmGKB/CPIC-annotated).
+   * Returns variants with non-null pharmgkb_level or star_allele.
+   */
+  async queryPharmacogenomicVariants(patientId: string): Promise<GeneticVariant[]> {
+    await this.ensureInitialized();
+    const result = await this.client.execute({
+      sql: `SELECT * FROM genetic_variants
+            WHERE patient_id = ? AND (pharmgkb_level IS NOT NULL OR star_allele IS NOT NULL)
+            ORDER BY gene_symbol, rsid`,
+      args: [patientId],
+    });
+    return result.rows.map((row) => mapRowToGeneticVariant(row as Record<string, unknown>));
+  }
+
+  /**
+   * Batch-update ClinVar annotation fields on genetic variants.
+   * Used by the L2 ClinVar annotation pipeline.
+   */
+  async updateVariantClinvarBatch(
+    updates: Array<{
+      id: string;
+      clinicalSignificance: string;
+      clinvarId: string;
+      reviewStatus: string;
+      geneSymbol: string | null;
+      conditions: string | null;
+      molecularConsequence: string | null;
+    }>,
+  ): Promise<number> {
+    await this.ensureInitialized();
+    if (updates.length === 0) return 0;
+
+    const CHUNK = 500;
+    let totalUpdated = 0;
+
+    for (let i = 0; i < updates.length; i += CHUNK) {
+      const chunk = updates.slice(i, i + CHUNK);
+      const stmts = chunk.map((u) => ({
+        sql: `UPDATE genetic_variants SET
+                clinical_significance = ?,
+                clinvar_id = ?,
+                clinvar_last_evaluated = datetime('now'),
+                review_status = ?,
+                gene_symbol = COALESCE(gene_symbol, ?),
+                conditions = ?,
+                molecular_consequence = ?
+              WHERE id = ?`,
+        args: [
+          u.clinicalSignificance,
+          u.clinvarId,
+          u.reviewStatus,
+          u.geneSymbol,
+          u.conditions,
+          u.molecularConsequence,
+          u.id,
+        ] as InValue[],
+      }));
+      const results = await this.client.batch(stmts, 'write');
+      for (const r of results) {
+        if (r.rowsAffected > 0) totalUpdated++;
+      }
+    }
+
+    return totalUpdated;
+  }
+
   // ─── Layer 0: Source Documents ────────────────────────────────────────
 
   async addSourceDocument(doc: SourceDocument): Promise<void> {
@@ -2231,11 +3335,11 @@ export class ClinicalStore {
               id, patient_id, original_filename, original_file_hash, original_file_size_bytes,
               original_page_count, mime_type, extraction_method, extraction_confidence,
               extraction_date, extraction_tool, extraction_wave, extracted_markdown_path,
-              pre_processing, post_processing, pipeline_version, category, subcategory,
+              pre_processing, post_processing, pipeline_version, content_hash, category, subcategory,
               date, facility, physician, language, tags,
               fhir_resource_type, loinc_doc_code, diagnostic_service_section,
               evidence_tier, validation_status, source_credibility
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         doc.id,
         doc.patientId,
@@ -2253,6 +3357,7 @@ export class ClinicalStore {
         doc.preProcessing ?? null,
         doc.postProcessing ?? null,
         doc.pipelineVersion ?? null,
+        doc.contentHash ?? null,
         doc.category,
         doc.subcategory ?? null,
         doc.date ?? null,
@@ -2279,6 +3384,103 @@ export class ClinicalStore {
     const row = result.rows[0];
     if (!row) return undefined;
     return mapRowToSourceDocument(row as Record<string, unknown>);
+  }
+
+  /**
+   * Delete all L0 + L1 records linked to a source document ID.
+   * Used by force re-import to clean up old records before inserting new ones.
+   */
+  async deleteRecordsBySourceDocId(sourceDocId: string): Promise<number> {
+    await this.ensureInitialized();
+    // All tables with a source_document_id column
+    const CHILD_TABLES = [
+      'clinical_patient_reports',
+      'clinical_lab_results',
+      'clinical_consultations',
+      'clinical_medications',
+      'medication_changes',
+      'medication_adherence',
+      'clinical_imaging_reports',
+      'clinical_abdominal_reports',
+      'clinical_imaging_findings',
+      'clinical_conditions',
+      'clinical_allergy_intolerances',
+      'clinical_family_history',
+      'clinical_agent_learnings',
+      'clinical_contradictions',
+      'clinical_treatment_trials',
+      'genetic_variants',
+    ] as const;
+
+    // Collect per-table counts for audit trail
+    const deletionCounts: Record<string, number> = {};
+    let totalDeleted = 0;
+    for (const table of CHILD_TABLES) {
+      try {
+        const result = await this.client.execute({
+          sql: `DELETE FROM ${table} WHERE source_document_id = ?`,
+          args: [sourceDocId],
+        });
+        if (result.rowsAffected > 0) {
+          deletionCounts[table] = result.rowsAffected;
+        }
+        totalDeleted += result.rowsAffected;
+      } catch {
+        // Table may not exist yet or may not have source_document_id column
+      }
+    }
+
+    // Delete the L0 source document itself
+    const srcResult = await this.client.execute({
+      sql: 'DELETE FROM source_documents WHERE id = ?',
+      args: [sourceDocId],
+    });
+    if (srcResult.rowsAffected > 0) {
+      deletionCounts['source_documents'] = srcResult.rowsAffected;
+    }
+    totalDeleted += srcResult.rowsAffected;
+
+    // Record deletion in W3C PROV audit trail (best-effort, don't block on failure)
+    if (totalDeleted > 0) {
+      try {
+        const now = new Date().toISOString();
+        const activityId = `act-deletion-${sourceDocId}-${Date.now()}`;
+        await this.client.execute({
+          sql: `INSERT INTO prov_activities (id, type, started_at, ended_at, metadata, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)`,
+          args: [
+            activityId,
+            'deletion',
+            now,
+            now,
+            JSON.stringify({
+              sourceDocId,
+              tables: deletionCounts,
+              totalDeleted,
+              reason: 'force-reimport',
+            }),
+            now,
+          ],
+        });
+        // Record wasInvalidatedBy relation
+        await this.client.execute({
+          sql: `INSERT INTO prov_relations (id, type, subject_id, object_id, activity_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)`,
+          args: [
+            `rel-invalidated-${sourceDocId}-${Date.now()}`,
+            'wasInvalidatedBy',
+            sourceDocId,
+            activityId,
+            activityId,
+            now,
+          ],
+        });
+      } catch {
+        // Audit trail is best-effort — don't block deletion if provenance tables don't exist
+      }
+    }
+
+    return totalDeleted;
   }
 
   async querySourceDocuments(params: SourceDocumentQuery): Promise<SourceDocument[]> {
@@ -2338,7 +3540,7 @@ export class ClinicalStore {
     return counts;
   }
 
-  // ─── Layer 2A: Imaging Findings ─────────────────────────────────────────
+  // ─── Layer 1: Imaging Findings ──────────────────────────────────────────
 
   async addImagingFinding(finding: ImagingFinding): Promise<void> {
     await this.ensureInitialized();
@@ -2447,7 +3649,7 @@ export class ClinicalStore {
     return result.rows.map((row) => mapRowToImagingFinding(row as Record<string, unknown>));
   }
 
-  // ─── Layer 2A: Diagnoses ────────────────────────────────────────────────
+  // ─── Layer 1: Diagnoses ─────────────────────────────────────────────────
 
   async addDiagnosis(dx: Diagnosis): Promise<void> {
     await this.ensureInitialized();
@@ -2507,7 +3709,7 @@ export class ClinicalStore {
     return result.rows.map((row) => mapRowToDiagnosis(row as Record<string, unknown>));
   }
 
-  // ─── Layer 2A: Progressions ─────────────────────────────────────────────
+  // ─── Layer 1: Progressions ──────────────────────────────────────────────
 
   async addProgression(prog: Progression): Promise<void> {
     await this.ensureInitialized();
@@ -2592,7 +3794,7 @@ export class ClinicalStore {
     return result.rows.map((row) => mapRowToProgression(row as Record<string, unknown>));
   }
 
-  // ─── Layer 5: Report Versions ───────────────────────────────────────────
+  // ─── Layer 4: Report Versions ───────────────────────────────────────────
 
   async addReportVersion(report: ReportVersion): Promise<void> {
     await this.ensureInitialized();
@@ -2645,7 +3847,7 @@ export class ClinicalStore {
     return result.rows.map((row) => mapRowToReportVersion(row as Record<string, unknown>));
   }
 
-  // ─── Layer 5: Report Data Integration ───────────────────────────────────
+  // ─── Layer 4: Report Data Integration ───────────────────────────────────
 
   async addReportDataIntegration(integration: ReportDataIntegration): Promise<void> {
     await this.ensureInitialized();
@@ -2732,9 +3934,34 @@ function mapRowToGeneticVariant(row: Record<string, unknown>): GeneticVariant {
     source: String(row['source']),
     referenceGenome: String(row['reference_genome']),
     importDate: String(row['import_date']),
+    // Provenance + FHIR
+    ...mapProvenance(row),
+    ...mapFhirMetadata(row),
   };
   if (row['source_version']) result.sourceVersion = String(row['source_version']);
   if (row['raw_line']) result.rawLine = String(row['raw_line']);
+  // GA4GH VRS 2.0
+  if (row['vrs_digest']) result.vrsDigest = String(row['vrs_digest']);
+  if (row['vrs_allele_id']) result.vrsAlleleId = String(row['vrs_allele_id']);
+  // FHIR Genomics Reporting IG
+  if (row['genomic_source_class']) result.genomicSourceClass = String(row['genomic_source_class']) as GeneticVariant['genomicSourceClass'];
+  if (row['allelic_state']) result.allelicState = String(row['allelic_state']) as GeneticVariant['allelicState'];
+  if (row['coding_change_type']) result.codingChangeType = String(row['coding_change_type']);
+  // ClinVar/ACMG
+  if (row['clinical_significance']) result.clinicalSignificance = String(row['clinical_significance']) as GeneticVariant['clinicalSignificance'];
+  if (row['clinvar_id']) result.clinvarId = String(row['clinvar_id']);
+  if (row['clinvar_last_evaluated']) result.clinvarLastEvaluated = String(row['clinvar_last_evaluated']);
+  if (row['review_status']) result.reviewStatus = String(row['review_status']);
+  if (row['gene_symbol']) result.geneSymbol = String(row['gene_symbol']);
+  if (row['conditions']) result.conditions = String(row['conditions']);
+  if (row['molecular_consequence']) result.molecularConsequence = String(row['molecular_consequence']);
+  // Pharmacogenomics
+  if (row['pharmgkb_level']) result.pharmgkbLevel = String(row['pharmgkb_level']);
+  if (row['star_allele']) result.starAllele = String(row['star_allele']);
+  // Population frequency
+  if (row['global_minor_allele_freq'] !== null && row['global_minor_allele_freq'] !== undefined) {
+    result.globalMinorAlleleFreq = Number(row['global_minor_allele_freq']);
+  }
   return result;
 }
 
@@ -2751,6 +3978,20 @@ function mapProvenance(row: Record<string, unknown>): {
   return result as ReturnType<typeof mapProvenance>;
 }
 
+function mapFhirMetadata(row: Record<string, unknown>): {
+  sourceDocumentId?: string;
+  fhirResourceType?: string;
+  fhirStatus?: LabResult['fhirStatus'];
+  documentCategory?: LabResult['documentCategory'];
+} {
+  const result: Record<string, unknown> = {};
+  if (row['source_document_id']) result['sourceDocumentId'] = String(row['source_document_id']);
+  if (row['fhir_resource_type']) result['fhirResourceType'] = String(row['fhir_resource_type']);
+  if (row['fhir_status']) result['fhirStatus'] = String(row['fhir_status']);
+  if (row['document_category']) result['documentCategory'] = String(row['document_category']);
+  return result as ReturnType<typeof mapFhirMetadata>;
+}
+
 function mapRowToImagingReport(row: Record<string, unknown>): ImagingReport {
   return {
     id: String(row['id']),
@@ -2765,7 +4006,10 @@ function mapRowToImagingReport(row: Record<string, unknown>): ImagingReport {
     impression: optStr(row['impression']),
     comparison: optStr(row['comparison']),
     source: optStr(row['source']),
+    diagnosticServiceSection: optStr(row['diagnostic_service_section']),
+    loincStudyCode: optStr(row['loinc_study_code']),
     ...mapProvenance(row),
+    ...mapFhirMetadata(row),
   } as ImagingReport;
 }
 
@@ -2780,7 +4024,9 @@ function mapRowToAbdominalReport(row: Record<string, unknown>): AbdominalReport 
     findings: optStr(row['findings']),
     conclusions: optStr(row['conclusions']),
     source: optStr(row['source']),
+    loincProcedureCode: optStr(row['loinc_procedure_code']),
     ...mapProvenance(row),
+    ...mapFhirMetadata(row),
   } as AbdominalReport;
 }
 
@@ -2789,6 +4035,7 @@ function mapRowToTreatmentTrial(row: Record<string, unknown>): TreatmentTrial {
     id: String(row['id']),
     patientId: String(row['patient_id']),
     medication: String(row['medication']),
+    rxnormCode: optStr(row['rxnorm_code']),
     drugClass: optStr(row['drug_class']),
     indication: optStr(row['indication']),
     startDate: optStr(row['start_date']),
@@ -2801,6 +4048,7 @@ function mapRowToTreatmentTrial(row: Record<string, unknown>): TreatmentTrial {
     reasonDiscontinued: optStr(row['reason_discontinued']),
     adequateTrial: row['adequate_trial'] === null ? undefined : Boolean(row['adequate_trial']),
     ...mapProvenance(row),
+    ...mapFhirMetadata(row),
   };
 }
 
@@ -2954,6 +4202,7 @@ function mapRowToSourceDocument(row: Record<string, unknown>): SourceDocument {
   if (row['pre_processing']) result.preProcessing = String(row['pre_processing']);
   if (row['post_processing']) result.postProcessing = String(row['post_processing']);
   if (row['pipeline_version']) result.pipelineVersion = String(row['pipeline_version']);
+  if (row['content_hash']) result.contentHash = String(row['content_hash']);
   if (row['subcategory']) result.subcategory = String(row['subcategory']);
   if (row['date']) result.date = String(row['date']);
   if (row['facility']) result.facility = String(row['facility']);
