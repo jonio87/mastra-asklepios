@@ -1,0 +1,602 @@
+[
+  {
+    "snomedCode": "79688008",
+    "icd10Code": "J98.09",
+    "conditionName": "Airway narrowing",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "48694002",
+    "icd10Code": "F41.9",
+    "conditionName": "Anxiety",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "197480006",
+    "icd10Code": "F41.9",
+    "conditionName": "Anxiety disorder",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "253098009",
+    "icd10Code": "Q76.0",
+    "conditionName": "Assimilation of C1",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "72167002",
+    "icd10Code": "G90.9",
+    "conditionName": "Autonomic dysfunction",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "161891005",
+    "icd10Code": "M54.9",
+    "conditionName": "Back pain",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "72276009",
+    "icd10Code": "Q75.8",
+    "conditionName": "Basilar impression",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "310701003",
+    "icd10Code": "M35.2",
+    "conditionName": "Behçet disease",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "18855002",
+    "icd10Code": "G47.63",
+    "conditionName": "Bruxism",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "373621006",
+    "icd10Code": "G89.29",
+    "conditionName": "Candidate for pain rehabilitation",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "396331005",
+    "icd10Code": "K90.0",
+    "conditionName": "Celiac disease",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "373930000",
+    "icd10Code": "G89.4",
+    "conditionName": "Central sensitization",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "202735001",
+    "icd10Code": "M50.10",
+    "conditionName": "Cervical disc herniation with radiculopathy",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "77566005",
+    "icd10Code": "M50.90",
+    "conditionName": "Cervical discopathy",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "128196005",
+    "icd10Code": "G99.2",
+    "conditionName": "Cervical myelopathy",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "298382003",
+    "icd10Code": "M41.9",
+    "conditionName": "Cervical scoliosis",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "267982007",
+    "icd10Code": "M47.812",
+    "conditionName": "Cervical spondylosis",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "76107001",
+    "icd10Code": "M48.02",
+    "conditionName": "Cervical stenosis",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "253098009",
+    "icd10Code": "Q07.0",
+    "conditionName": "Chiari malformation",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "89458003",
+    "icd10Code": "G44.1",
+    "conditionName": "Chronic headache",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "82423001",
+    "icd10Code": "G89.29",
+    "conditionName": "Chronic pain",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "373621006",
+    "icd10Code": "G89.4",
+    "conditionName": "Chronic pain syndrome",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "6847001",
+    "icd10Code": "J31.0",
+    "conditionName": "Chronic rhinitis",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "40055000",
+    "icd10Code": "J32.9",
+    "conditionName": "Chronic sinusitis",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "75628002",
+    "icd10Code": "G44.229",
+    "conditionName": "Chronic tension-type headache",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "90176007",
+    "icd10Code": "J35.01",
+    "conditionName": "Chronic tonsillitis",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "254806003",
+    "icd10Code": "D22.9",
+    "conditionName": "Compound melanocytic nevus",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "105969002",
+    "icd10Code": "M35.9",
+    "conditionName": "Connective tissue disorder",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "253098009",
+    "icd10Code": "Q75.8",
+    "conditionName": "Craniovertebral junction anomaly",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "35489007",
+    "icd10Code": "F32.9",
+    "conditionName": "Depression",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "60032008",
+    "icd10Code": "J34.2",
+    "conditionName": "Deviated nasal septum",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "76107001",
+    "icd10Code": "M51.26",
+    "conditionName": "Disc herniation",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "76107001",
+    "icd10Code": "M50.20",
+    "conditionName": "Disc protrusion C7/T1",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "254791003",
+    "icd10Code": "D22.9",
+    "conditionName": "Dysplastic nevus",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "398114001",
+    "icd10Code": "Q79.60",
+    "conditionName": "Ehlers-Danlos syndrome",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "95668009",
+    "icd10Code": "G50.1",
+    "conditionName": "Facial pain",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "203082005",
+    "icd10Code": "M79.7",
+    "conditionName": "Fibromyalgia",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "235899006",
+    "icd10Code": "K31.7",
+    "conditionName": "Gastric polyps",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "235595009",
+    "icd10Code": "K21.0",
+    "conditionName": "GERD",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "195353004",
+    "icd10Code": "M31.30",
+    "conditionName": "Granulomatosis with polyangiitis",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "13000001",
+    "icd10Code": "B96.81",
+    "conditionName": "H. pylori infection",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "25064002",
+    "icd10Code": "R51.9",
+    "conditionName": "Head pain",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "84089009",
+    "icd10Code": "K44.9",
+    "conditionName": "Hiatal hernia",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "55822004",
+    "icd10Code": "E78.5",
+    "conditionName": "Hyperlipidemia",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "249714002",
+    "icd10Code": "M40.50",
+    "conditionName": "Hyperlordosis",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "298181004",
+    "icd10Code": "M35.7",
+    "conditionName": "Hypermobility",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "40930008",
+    "icd10Code": "E03.9",
+    "conditionName": "Hypothyroidism",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "713426002",
+    "icd10Code": "I45.19",
+    "conditionName": "Incomplete right bundle branch block",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "193462001",
+    "icd10Code": "G47.00",
+    "conditionName": "Insomnia",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "48606007",
+    "icd10Code": "E88.81",
+    "conditionName": "Insulin resistance",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "10743008",
+    "icd10Code": "K58.9",
+    "conditionName": "Irritable bowel syndrome",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "279039007",
+    "icd10Code": "M54.5",
+    "conditionName": "Lower back pain",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "128196005",
+    "icd10Code": "M54.17",
+    "conditionName": "Lumbosacral radiculopathy",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "370143000",
+    "icd10Code": "F33.1",
+    "conditionName": "Major depressive disorder",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "37796009",
+    "icd10Code": "G43.909",
+    "conditionName": "Migraine",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "45326000",
+    "icd10Code": "M62.838",
+    "conditionName": "Muscle spasm",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "118954009",
+    "icd10Code": "M79.18",
+    "conditionName": "Myofascial pain",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "57190000",
+    "icd10Code": "H52.10",
+    "conditionName": "Myopia",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "254791003",
+    "icd10Code": "D48.5",
+    "conditionName": "Naevus dysplasticus cutis",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "81680005",
+    "icd10Code": "M54.2",
+    "conditionName": "Neck pain",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "95570007",
+    "icd10Code": "N20.0",
+    "conditionName": "Nephrolithiasis",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "78275009",
+    "icd10Code": "G47.33",
+    "conditionName": "Obstructive sleep apnea",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "84229001",
+    "icd10Code": "G52.8",
+    "conditionName": "Occipital neuralgia",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "42345000",
+    "icd10Code": "G62.89",
+    "conditionName": "Other specified polyneuropathies",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "80313002",
+    "icd10Code": "R00.2",
+    "conditionName": "Palpitations",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "45352006",
+    "icd10Code": "M62.838",
+    "conditionName": "Paraspinal muscle spasm",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "128302006",
+    "icd10Code": "K73.9",
+    "conditionName": "Partial hepatitis",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "302226006",
+    "icd10Code": "G62.9",
+    "conditionName": "Peripheral neuropathy",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "398979000",
+    "icd10Code": "G50.1",
+    "conditionName": "Persistent facial pain",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "42345000",
+    "icd10Code": "G62.9",
+    "conditionName": "Polyneuropathy",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "164883002",
+    "icd10Code": "I49.1",
+    "conditionName": "Premature atrial contractions",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "284470004",
+    "icd10Code": "I49.49",
+    "conditionName": "Premature contractions",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "164884008",
+    "icd10Code": "I49.3",
+    "conditionName": "Premature ventricular contractions",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "69896004",
+    "icd10Code": "M06.9",
+    "conditionName": "Rheumatoid arthritis",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "59118001",
+    "icd10Code": "I45.10",
+    "conditionName": "Right bundle branch block",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "76107001",
+    "icd10Code": "M50.12",
+    "conditionName": "Right-sided C6-C7 disc herniation",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "307731004",
+    "icd10Code": "M75.100",
+    "conditionName": "Rotator cuff injury",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "279039007",
+    "icd10Code": "M53.3",
+    "conditionName": "Sacroiliac joint pain",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "23056005",
+    "icd10Code": "M54.30",
+    "conditionName": "Sciatica",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "302226006",
+    "icd10Code": "G62.89",
+    "conditionName": "Sensory neuropathy",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "237632005",
+    "icd10Code": "E70.8",
+    "conditionName": "Serotonin deficiency",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "67859005",
+    "icd10Code": "M75.40",
+    "conditionName": "Shoulder impingement",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "420774007",
+    "icd10Code": "K63.89",
+    "conditionName": "SIBO",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "83901003",
+    "icd10Code": "M35.00",
+    "conditionName": "Sjögren syndrome",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "73430006",
+    "icd10Code": "G47.30",
+    "conditionName": "Sleep apnea",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "703275007",
+    "icd10Code": "G47.63",
+    "conditionName": "Sleep bruxism",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "443144003",
+    "icd10Code": "G62.89",
+    "conditionName": "Small fiber neuropathy",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "76107001",
+    "icd10Code": "M48.00",
+    "conditionName": "Spinal stenosis",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "431236002",
+    "icd10Code": "G44.059",
+    "conditionName": "SUNCT syndrome",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "111496009",
+    "icd10Code": "G95.0",
+    "conditionName": "Syringomyelia",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "55464009",
+    "icd10Code": "M32.9",
+    "conditionName": "Systemic lupus erythematosus",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "3424008",
+    "icd10Code": "R00.0",
+    "conditionName": "Tachycardia",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "52021006",
+    "icd10Code": "M26.60",
+    "conditionName": "Temporomandibular anomalies",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "398057008",
+    "icd10Code": "G44.209",
+    "conditionName": "Tension-type headache",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "398057008",
+    "icd10Code": "G44.099",
+    "conditionName": "Trigeminal autonomic cephalgia",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "31681005",
+    "icd10Code": "G50.0",
+    "conditionName": "Trigeminal neuralgia",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "31681005",
+    "icd10Code": "G50.8",
+    "conditionName": "Trigeminal neuropathy",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "254477009",
+    "icd10Code": "J34.3",
+    "conditionName": "Turbinate hypertrophy",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "54150009",
+    "icd10Code": "J06.9",
+    "conditionName": "Upper respiratory tract infection",
+    "relationship": "equivalent"
+  },
+  {
+    "snomedCode": "34713006",
+    "icd10Code": "E55.9",
+    "conditionName": "Vitamin D deficiency",
+    "relationship": "equivalent"
+  }
+]
