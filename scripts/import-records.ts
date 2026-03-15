@@ -3,16 +3,16 @@
  *
  * Phase 0:   Validate all files (fail-early — no DB writes until everything passes)
  * Phase 0.5: Layer 0 — Source Documents (extraction metadata, provenance tracking)
- * Phase 1:   Layer 3 — Document Knowledge Base (semantic search via embeddings)
- * Phase 2:   Layer 2 — Structured Records (labs, consultations, imaging, procedures, narratives)
+ * Phase 1:   Semantic Index (cross-cutting) — Document Knowledge Base (embeddings)
+ * Phase 2:   Layer 1 — Structured Clinical Records (labs, consultations, imaging, procedures, narratives)
  *
  * Usage:
  *   npx tsx scripts/import-records.ts <records-dir> [options]
  *
  * Options:
  *   --dry-run            Validate only, don't write to DB
- *   --layer3-only        Skip Layer 2 structured records
- *   --layer2-only        Skip Layer 3 document ingestion
+ *   --layer3-only        Skip Layer 1 structured records (semantic index only)
+ *   --layer2-only        Skip semantic index (Layer 1 structured records only)
  *   --verbose            Print each file as it's processed
  *   --continue-on-error  Don't abort on validation errors (import valid files only)
  */
@@ -23,10 +23,12 @@ import type { ParsedRecord } from '../src/importers/parser.js';
 import type { RecordFrontmatter, StructuredLabValue } from '../src/importers/schemas.js';
 import type { SourceDocument } from '../src/schemas/source-document.js';
 import { discoverRecordFiles, parseRecordFile, stripFrontmatter } from '../src/importers/parser.js';
-import { normalizeLabValue } from '../src/importers/normalizer.js';
+import { normalizeLabValue, getLoincCode, getValueSnomedCode } from '../src/importers/normalizer.js';
 import { mapConsultation } from '../src/importers/consultation-parser.js';
+import { extractClinicalFindings } from '../src/importers/findings-extractor.js';
 import { mapImagingReport } from '../src/importers/imaging-parser.js';
 import { mapProcedureReport } from '../src/importers/procedure-parser.js';
+import { getSnomedSpecialtyCode, normalizeSpecialty } from '../src/importers/specialty-normalizer.js';
 import { documentTypeMapping } from '../src/importers/schemas.js';
 import { getClinicalStore } from '../src/storage/clinical-store.js';
 import { getProvenanceStore } from '../src/storage/provenance-store.js';
@@ -44,6 +46,7 @@ interface ImportOptions {
   layer2Only: boolean;
   verbose: boolean;
   continueOnError: boolean;
+  forceReimport: boolean;
 }
 
 function parseArgs(): ImportOptions {
@@ -55,10 +58,11 @@ function parseArgs(): ImportOptions {
     console.error('');
     console.error('Options:');
     console.error('  --dry-run            Validate only, don\'t write to DB');
-    console.error('  --layer3-only        Skip Layer 2 structured records');
-    console.error('  --layer2-only        Skip Layer 3 document ingestion');
+    console.error('  --layer3-only        Skip Layer 1 structured records (semantic index only)');
+    console.error('  --layer2-only        Skip semantic index (Layer 1 structured records only)');
     console.error('  --verbose            Print each file as it\'s processed');
     console.error('  --continue-on-error  Import valid files even if some fail validation');
+    console.error('  --force-reimport     Delete old L1 records, reimport from extracted markdown');
     process.exit(1);
   }
 
@@ -69,6 +73,7 @@ function parseArgs(): ImportOptions {
     layer2Only: args.includes('--layer2-only'),
     verbose: args.includes('--verbose'),
     continueOnError: args.includes('--continue-on-error'),
+    forceReimport: args.includes('--force-reimport'),
   };
 }
 
@@ -156,6 +161,13 @@ function mapToSourceDocument(record: ParsedRecord): SourceDocument {
   if (typeof fm['physician'] === 'string') doc.physician = fm['physician'];
   if (fm.language) doc.language = fm.language;
   if (fm.tags) doc.tags = fm.tags;
+
+  // FHIR R4 + LOINC Document Ontology fields
+  if (typeof fm['fhir_resource_type'] === 'string')
+    doc.fhirResourceType = fm['fhir_resource_type'] as SourceDocument['fhirResourceType'];
+  if (typeof fm['loinc_doc_code'] === 'string') doc.loincDocCode = fm['loinc_doc_code'];
+  if (typeof fm['diagnostic_service_section'] === 'string')
+    doc.diagnosticServiceSection = fm['diagnostic_service_section'] as SourceDocument['diagnosticServiceSection'];
 
   return doc;
 }
@@ -286,7 +298,7 @@ async function recordImportProvenance(
   }
 }
 
-// ─── Phase 1: Layer 3 — Document Knowledge Base ──────────────────────────
+// ─── Phase 1: Semantic Index — Document Knowledge Base ───────────────────
 
 interface Layer3Result {
   ingested: number;
@@ -301,7 +313,7 @@ async function importLayer3(
 ): Promise<Layer3Result> {
   const embedder = createEmbedder();
   if (!embedder) {
-    console.error('Layer 3 import requires OPENAI_API_KEY for embeddings.');
+    console.error('Semantic Index import requires OPENAI_API_KEY for embeddings.');
     console.error('Set OPENAI_API_KEY in .env or environment, or use --layer2-only.');
     process.exit(1);
   }
@@ -350,13 +362,13 @@ async function importLayer3(
         result.totalChunks += ingestion.chunkCount;
         if (verbose) {
           console.log(
-            `  L3  ${fm.document_id} → ${ingestion.chunkCount} chunks`,
+            `  SI  ${fm.document_id} → ${ingestion.chunkCount} chunks`,
           );
         }
       } catch (err) {
         result.errors++;
         const message = err instanceof Error ? err.message : String(err);
-        console.error(`  ERR  L3 ${fm.document_id}: ${message}`);
+        console.error(`  ERR  SI ${fm.document_id}: ${message}`);
       }
     }
 
@@ -369,7 +381,7 @@ async function importLayer3(
   return result;
 }
 
-// ─── Phase 2: Layer 2 — Structured Lab Results ───────────────────────────
+// ─── Phase 2: Layer 1 — Structured Lab Results ──────────────────────────
 
 interface Layer2Result {
   labsInserted: number;
@@ -399,10 +411,10 @@ function mapLabValue(
   if (value.loinc) noteParts.push(`LOINC: ${value.loinc}`);
   const notes = noteParts.length > 0 ? noteParts.join('; ') : undefined;
 
-  const source = fm.source_lab ?? fm.facility ?? fm.institution;
+  const source = fm.source_lab ?? fm.facility ?? fm.institution ?? fm.source_file ?? 'patient-compiled';
 
   // Normalize test name and unit to international English standard
-  const normalized = normalizeLabValue(value.test_name, value.unit);
+  const normalized = normalizeLabValue(value.test_name, value.unit ?? '');
 
   const lab: LabResult = {
     id,
@@ -421,6 +433,20 @@ function mapLabValue(
   if (fm.evidence_tier) lab.evidenceTier = fm.evidence_tier;
   if (fm.validation_status) lab.validationStatus = fm.validation_status;
   if (fm.source_credibility !== undefined) lab.sourceCredibility = fm.source_credibility;
+
+  // FHIR R4 metadata — Observation resource
+  lab.fhirResourceType = 'Observation';
+  lab.fhirStatus = 'final';
+  lab.documentCategory = 'diagnostic-report';
+  if (typeof fm.document_id === 'string') lab.sourceDocumentId = `src-${fm.document_id}`;
+  // LOINC code: prefer verified canonical map, fall back to source data
+  // (source YAML codes were assigned during extraction and may contain errors)
+  const loincCode = getLoincCode(normalized.testName) ?? (value.loinc || undefined);
+  if (loincCode) lab.loincCode = loincCode;
+
+  // SNOMED CT qualitative value coding (LOINC = question, SNOMED = answer)
+  const valueSnomedCode = getValueSnomedCode(String(value.value));
+  if (valueSnomedCode) lab.valueSnomedCode = valueSnomedCode;
 
   return lab;
 }
@@ -448,7 +474,7 @@ async function importLayer2(
 
     if (verbose) {
       console.log(
-        `  L2  ${record.frontmatter.document_id} → ${labs.length} lab values`,
+        `  L1  ${record.frontmatter.document_id} → ${labs.length} lab values`,
       );
     }
   }
@@ -458,10 +484,25 @@ async function importLayer2(
     result.labsInserted = batchResult.inserted;
   }
 
+  // Backfill SNOMED qualitative codes for any existing rows missing them
+  const existingLabs = await store.queryLabs({ patientId: allLabs[0]?.patientId ?? '' });
+  let backfilled = 0;
+  for (const lab of existingLabs) {
+    if (lab.valueSnomedCode) continue;
+    const code = getValueSnomedCode(String(lab.value));
+    if (code) {
+      await store.updateLabSnomedCode(lab.id, code);
+      backfilled++;
+    }
+  }
+  if (backfilled > 0 && verbose) {
+    console.log(`  Backfilled ${backfilled} SNOMED qualitative codes`);
+  }
+
   return result;
 }
 
-// ─── Phase 2b: Layer 2 — Structured Consultations ────────────────────────
+// ─── Phase 2b: Layer 1 — Structured Consultations ───────────────────────
 
 interface ConsultationImportResult {
   imported: number;
@@ -479,6 +520,10 @@ async function importConsultations(
     (r) => r.frontmatter.document_type === 'consultation',
   );
 
+  // Track LLM extraction stats
+  let llmAttempts = 0;
+  let llmSuccesses = 0;
+
   for (const record of consultationRecords) {
     const rawContent = await readFile(record.filePath, 'utf-8');
     const bodyText = stripFrontmatter(rawContent);
@@ -490,20 +535,54 @@ async function importConsultations(
     }
 
     const consultation = mapConsultation(record.frontmatter, bodyText);
+
+    // LLM fallback: if no SNOMED finding code assigned by static extraction,
+    // try LLM-based extraction from the full consultation text
+    if (!consultation.snomedFindingCode && bodyText.trim().length > 50) {
+      llmAttempts++;
+      try {
+        const llmResult = await extractClinicalFindings(
+          bodyText,
+          consultation.specialty,
+          consultation.conclusions,
+        );
+        if (llmResult && llmResult.confidence >= 0.5) {
+          consultation.snomedFindingCode = llmResult.snomedCode;
+          llmSuccesses++;
+          if (verbose) {
+            console.log(
+              `    🧠 LLM: "${llmResult.findingName}" → ${llmResult.snomedCode} (conf: ${llmResult.confidence.toFixed(2)})`,
+            );
+          }
+        }
+      } catch {
+        // LLM failure is non-fatal — continue without SNOMED finding code
+      }
+    }
+
     await store.addConsultation(consultation);
     result.imported++;
 
     if (verbose) {
+      const snomedTag = consultation.snomedFindingCode
+        ? ` [SNOMED:${consultation.snomedFindingCode}]`
+        : '';
       console.log(
-        `  L2C ${record.frontmatter.document_id} → ${consultation.specialty} (${consultation.provider})`,
+        `  L1C ${record.frontmatter.document_id} → ${consultation.specialty} (${consultation.provider})${snomedTag}`,
       );
     }
+  }
+
+  if (llmAttempts > 0) {
+    console.log(
+      `  📊 LLM findings extraction: ${llmSuccesses}/${llmAttempts} successful (${((llmSuccesses / llmAttempts) * 100).toFixed(1)}%)`,
+    );
   }
 
   return result;
 }
 
-// ─── Phase 2c: Layer 2 — Structured Imaging Reports ──────────────────────
+// ─── Phase 2c: Layer 1 — Structured Imaging Reports ─────────────────────
 
 interface ImagingImportResult {
   imported: number;
@@ -545,7 +624,7 @@ async function importImagingReports(
 
     if (verbose) {
       console.log(
-        `  L2I ${record.frontmatter.document_id} → ${report.modality} ${report.bodyRegion}`,
+        `  L1I ${record.frontmatter.document_id} → ${report.modality} ${report.bodyRegion}`,
       );
     }
   }
@@ -553,7 +632,7 @@ async function importImagingReports(
   return result;
 }
 
-// ─── Phase 2d: Layer 2 — Structured Procedure Reports (FHIR Procedure) ──
+// ─── Phase 2d: Layer 1 — Structured Procedure Reports (FHIR Procedure) ─
 
 interface ProcedureImportResult {
   imported: number;
@@ -596,7 +675,7 @@ async function importProcedureReports(
 
     if (verbose) {
       console.log(
-        `  L2P ${record.frontmatter.document_id} → ${report.procedureType}`,
+        `  L1P ${record.frontmatter.document_id} → ${report.procedureType}`,
       );
     }
   }
@@ -604,7 +683,7 @@ async function importProcedureReports(
   return result;
 }
 
-// ─── Phase 2e: Layer 2 — Narrative + External as Patient Reports ─────────
+// ─── Phase 2e: Layer 1 — Narrative + External as Patient Reports ────────
 
 interface NarrativeImportResult {
   imported: number;
@@ -642,11 +721,12 @@ async function importNarrativesAndExternals(
       evidenceTier: record.frontmatter.evidence_tier,
       validationStatus: record.frontmatter.validation_status,
       sourceCredibility: record.frontmatter.source_credibility,
+      sourceDocumentId: `src-${record.frontmatter.document_id}`,
     });
     result.imported++;
 
     if (verbose) {
-      console.log(`  L2N ${record.frontmatter.document_id} → patient_report (self-observation)`);
+      console.log(`  L1N ${record.frontmatter.document_id} → patient_report (self-observation)`);
     }
   }
 
@@ -665,26 +745,30 @@ async function importNarrativesAndExternals(
     }
 
     const fm = record.frontmatter as RecordFrontmatter & Record<string, unknown>;
+    const rawSpecialty = typeof fm['specialty'] === 'string' ? fm['specialty'] : 'general_medicine';
+    const canonSpecialty = normalizeSpecialty(rawSpecialty);
     const consultation = {
       id: `import-ext-${record.frontmatter.document_id}`,
       patientId: record.frontmatter.patient_id,
       provider: typeof fm['physician'] === 'string' ? fm['physician'] : 'Unknown',
-      specialty: typeof fm['specialty'] === 'string' ? fm['specialty'] : 'general_medicine',
+      specialty: canonSpecialty,
       date: record.frontmatter.date ?? 'unknown',
       conclusionsStatus: 'unknown' as const,
       findings: bodyText.trim(),
       institution: fm.facility ?? fm.institution,
       source: record.frontmatter.source_file,
+      snomedSpecialtyCode: getSnomedSpecialtyCode(canonSpecialty),
       evidenceTier: record.frontmatter.evidence_tier,
       validationStatus: record.frontmatter.validation_status,
       sourceCredibility: record.frontmatter.source_credibility,
+      sourceDocumentId: `src-${record.frontmatter.document_id}`,
     };
 
     await store.addConsultation(consultation);
     result.imported++;
 
     if (verbose) {
-      console.log(`  L2E ${record.frontmatter.document_id} → consultation (external)`);
+      console.log(`  L1E ${record.frontmatter.document_id} → consultation (external)`);
     }
   }
 
@@ -703,8 +787,9 @@ async function main(): Promise<void> {
 
   console.log(`\nImporting medical records from: ${opts.recordsDir}`);
   if (opts.dryRun) console.log('  Mode: DRY RUN (validation only)');
-  if (opts.layer3Only) console.log('  Mode: Layer 3 only');
-  if (opts.layer2Only) console.log('  Mode: Layer 2 only');
+  if (opts.layer3Only) console.log('  Mode: Semantic Index only (skip L1)');
+  if (opts.layer2Only) console.log('  Mode: Layer 1 only (skip Semantic Index)');
+  if (opts.forceReimport) console.log('  Mode: FORCE REIMPORT (delete old L1 records first)');
   console.log('');
 
   // ── Discover files ──────────────────────────────────────────────────────
@@ -745,11 +830,48 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // ── Version detection: flag old pipeline versions for re-processing ────
+  const versionCounts: Record<string, number> = {};
+  for (const record of validation.valid) {
+    const fm = record.frontmatter as RecordFrontmatter & Record<string, unknown>;
+    const version = typeof fm['extraction_pipeline_version'] === 'string'
+      ? fm['extraction_pipeline_version']
+      : 'unknown';
+    versionCounts[version] = (versionCounts[version] ?? 0) + 1;
+  }
+  if (Object.keys(versionCounts).length > 0) {
+    console.log('\n  Pipeline version distribution:');
+    for (const [version, count] of Object.entries(versionCounts).sort()) {
+      const flag = version !== '3.0.0' && version !== 'unknown' ? ' ← outdated, will re-process' : '';
+      console.log(`    v${version}: ${count} documents${flag}`);
+    }
+  }
+
   if (opts.dryRun) {
     console.log('\nDry run complete — no data was written.');
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`Time: ${elapsed}s\n`);
     process.exit(0);
+  }
+
+  // ── Force reimport: delete existing L1 records ─────────────────────────
+  if (opts.forceReimport) {
+    console.log('\nPhase 0.1: Force reimport — deleting old L1 records...');
+    const reimportStore = getClinicalStore();
+    let totalDeleted = 0;
+    for (const record of validation.valid) {
+      const docId = `src-${record.frontmatter.document_id}`;
+      try {
+        const deleted = await reimportStore.deleteRecordsBySourceDocId(docId);
+        totalDeleted += deleted;
+        if (opts.verbose && deleted > 0) {
+          console.log(`  Deleted ${deleted} records for ${docId}`);
+        }
+      } catch {
+        // Source doc may not exist yet — that's fine
+      }
+    }
+    console.log(`  Deleted ${totalDeleted} old L1 records across ${validation.valid.length} documents`);
   }
 
   // ── Phase 0.5: Layer 0 — Source Documents ─────────────────────────────
@@ -764,46 +886,145 @@ async function main(): Promise<void> {
     `Imported ${layer0Result.imported} source documents from ${opts.recordsDir}`,
   );
 
-  // ── Phase 1: Layer 3 ───────────────────────────────────────────────────
+  // ── Phase 1: Semantic Index (cross-cutting) ────────────────────────────
   let layer3Result: Layer3Result | undefined;
   if (!opts.layer2Only) {
-    console.log('\nPhase 1: Layer 3 — Document Knowledge Base...');
+    console.log('\nPhase 1: Semantic Index — Document Knowledge Base...');
     layer3Result = await importLayer3(validation.valid, opts.verbose);
   }
 
-  // ── Phase 2: Layer 2 ───────────────────────────────────────────────────
+  // ── Phase 2: Layer 1 — Structured Clinical Records ────────────────────
   let layer2Result: Layer2Result | undefined;
   if (!opts.layer3Only) {
-    console.log('\nPhase 2a: Layer 2 — Structured Lab Results...');
+    console.log('\nPhase 2a: Layer 1 — Structured Lab Results...');
     layer2Result = await importLayer2(validation.valid, opts.verbose);
   }
 
-  // ── Phase 2b: Layer 2 — Consultations ──────────────────────────────────
+  // ── Phase 2b: Layer 1 — Consultations ─────────────────────────────────
   let consultResult: ConsultationImportResult | undefined;
   if (!opts.layer3Only) {
-    console.log('\nPhase 2b: Layer 2 — Structured Consultations...');
+    console.log('\nPhase 2b: Layer 1 — Structured Consultations...');
     consultResult = await importConsultations(validation.valid, opts.verbose);
   }
 
-  // ── Phase 2c: Layer 2 — Imaging Reports ────────────────────────────────
+  // ── Phase 2c: Layer 1 — Imaging Reports ───────────────────────────────
   let imagingResult: ImagingImportResult | undefined;
   if (!opts.layer3Only) {
-    console.log('\nPhase 2c: Layer 2 — Structured Imaging Reports...');
+    console.log('\nPhase 2c: Layer 1 — Structured Imaging Reports...');
     imagingResult = await importImagingReports(validation.valid, opts.verbose);
   }
 
-  // ── Phase 2d: Layer 2 — Procedure Reports (FHIR Procedure) ─────────────
+  // ── Phase 2d: Layer 1 — Procedure Reports (FHIR Procedure) ────────────
   let procedureResult: ProcedureImportResult | undefined;
   if (!opts.layer3Only) {
-    console.log('\nPhase 2d: Layer 2 — Structured Procedure Reports...');
+    console.log('\nPhase 2d: Layer 1 — Structured Procedure Reports...');
     procedureResult = await importProcedureReports(validation.valid, opts.verbose);
   }
 
-  // ── Phase 2e: Layer 2 — Narratives + External ──────────────────────────
+  // ── Phase 2e: Layer 1 — Narratives + External ─────────────────────────
   let narrativeResult: NarrativeImportResult | undefined;
   if (!opts.layer3Only) {
-    console.log('\nPhase 2e: Layer 2 — Narratives + External Documents...');
+    console.log('\nPhase 2e: Layer 1 — Narratives + External Documents...');
     narrativeResult = await importNarrativesAndExternals(validation.valid, opts.verbose);
+  }
+
+  // ── Phase 2f: Layer 1 — Medications (extracted from consultations) ──────
+  let medsImported = 0;
+  let changesImported = 0;
+  let adherenceImported = 0;
+  if (!opts.dryRun && !opts.layer3Only) {
+    console.log('\nPhase 2f: Layer 1 — Medications...');
+    const { extractMedications, mentionToMedication, extractMedicationChanges, extractAdherenceMentions } = await import('../src/importers/medication-extractor.js');
+    const { getRxnormCode } = await import('../src/importers/rxnorm-normalizer.js');
+    const medStore = getClinicalStore();
+    const patientId = 'patient-tomasz-szychlinski';
+
+    // Scan consultation + external + procedure documents for medication mentions
+    const medSourceTypes = new Set(['consultation', 'external', 'procedure']);
+    const allMedFiles = validation.valid.filter(
+      (f) => medSourceTypes.has(f.frontmatter.document_type),
+    );
+
+    const globalMeds = new Map<string, { med: ReturnType<typeof mentionToMedication>; date: string; confidence: number }>();
+    const changesSeen = new Set<string>();
+
+    for (const file of allMedFiles) {
+      const fm = file.frontmatter;
+      const docId = `src-${fm.document_id}`;
+      const docDate = fm.date ?? 'unknown';
+
+      // Extract medication mentions
+      const mentions = extractMedications(file.body, docDate);
+
+      for (const mention of mentions) {
+        const med = mentionToMedication(mention, patientId, docId, docDate);
+
+        // Normalize key: strip brand parentheticals, lowercase
+        const dedupKey = mention.genericName.replace(/\s*\([^)]+\)\s*/g, '').trim().toLowerCase();
+
+        // Keep the highest-confidence version of each medication
+        const existing = globalMeds.get(dedupKey);
+        if (!existing || mention.confidence > existing.confidence ||
+            (mention.confidence === existing.confidence && docDate > existing.date)) {
+          // Use the clean generic name for the medication
+          med.medicationName = dedupKey;
+          globalMeds.set(dedupKey, { med, date: docDate, confidence: mention.confidence });
+        }
+      }
+
+      // Extract medication change events
+      const changes = extractMedicationChanges(file.body);
+      for (const change of changes) {
+        const changeKey = `${change.medicationName}:${change.changeType}:${change.newValue ?? ''}:${docDate}`;
+        if (changesSeen.has(changeKey)) continue;
+        changesSeen.add(changeKey);
+
+        await medStore.addMedicationChange({
+          id: `mc-${change.medicationName.replace(/\s+/g, '-')}-${change.changeType}-${docId}`,
+          patientId,
+          medicationName: change.medicationName,
+          rxnormCode: change.rxnormCode,
+          changeType: change.changeType,
+          changeDate: docDate !== 'unknown' ? docDate : undefined,
+          previousValue: change.previousValue,
+          newValue: change.newValue,
+          reason: change.reason,
+          sourceDocumentId: docId,
+          evidenceTier: 'T1-official',
+          validationStatus: 'unvalidated',
+          sourceCredibility: 75,
+        });
+        changesImported++;
+      }
+
+      // Extract adherence mentions
+      const adherenceMentions = extractAdherenceMentions(file.body);
+      for (const adh of adherenceMentions) {
+        await medStore.addAdherenceObservation({
+          id: `adh-${docId}-${adherenceImported}`,
+          patientId,
+          medicationName: adh.medicationName ?? 'general',
+          rxnormCode: adh.medicationName ? getRxnormCode(adh.medicationName) : undefined,
+          observationDate: docDate !== 'unknown' ? docDate : undefined,
+          adherenceCode: adh.adherenceCode,
+          reporter: adh.reporter,
+          notes: adh.notes,
+          sourceDocumentId: docId,
+          evidenceTier: 'T1-official',
+          validationStatus: 'unvalidated',
+          sourceCredibility: 70,
+        });
+        adherenceImported++;
+      }
+    }
+
+    // Import deduplicated medications
+    for (const [, { med }] of globalMeds) {
+      // Use stable ID (no source doc suffix) for deduplication
+      med.id = `med-${med.medicationName.replace(/\s+/g, '-').toLowerCase()}`;
+      await medStore.addMedication(med);
+      medsImported++;
+    }
   }
 
   // ── Summary ─────────────────────────────────────────────────────────────
@@ -815,32 +1036,78 @@ async function main(): Promise<void> {
   console.log(`  Layer 0 (Source Docs):    ${layer0Result.imported} imported, ${layer0Result.skipped} skipped`);
 
   if (layer3Result) {
-    console.log(`  Layer 3 (Documents):     ${layer3Result.ingested} ingested, ${layer3Result.skipped} skipped, ${layer3Result.errors} errors`);
+    console.log(`  Semantic Index (Docs):   ${layer3Result.ingested} ingested, ${layer3Result.skipped} skipped, ${layer3Result.errors} errors`);
     console.log(`                           ${layer3Result.totalChunks} total chunks embedded`);
   }
 
   if (layer2Result) {
-    console.log(`  Layer 2 (Lab Results):    ${layer2Result.labsInserted} values from ${layer2Result.filesProcessed} files`);
+    console.log(`  Layer 1 (Lab Results):    ${layer2Result.labsInserted} values from ${layer2Result.filesProcessed} files`);
   }
 
   if (consultResult) {
-    console.log(`  Layer 2 (Consultations):  ${consultResult.imported} imported, ${consultResult.skipped} skipped`);
+    console.log(`  Layer 1 (Consultations):  ${consultResult.imported} imported, ${consultResult.skipped} skipped`);
   }
 
   if (imagingResult) {
-    console.log(`  Layer 2 (Imaging):        ${imagingResult.imported} imported, ${imagingResult.skipped} skipped`);
+    console.log(`  Layer 1 (Imaging):        ${imagingResult.imported} imported, ${imagingResult.skipped} skipped`);
   }
 
   if (procedureResult) {
-    console.log(`  Layer 2 (Procedures):     ${procedureResult.imported} imported, ${procedureResult.skipped} skipped`);
+    console.log(`  Layer 1 (Procedures):     ${procedureResult.imported} imported, ${procedureResult.skipped} skipped`);
   }
 
   if (narrativeResult) {
-    console.log(`  Layer 2 (Narrative/Ext):  ${narrativeResult.imported} imported, ${narrativeResult.skipped} skipped`);
+    console.log(`  Layer 1 (Narrative/Ext):  ${narrativeResult.imported} imported, ${narrativeResult.skipped} skipped`);
+  }
+
+  if (medsImported > 0) {
+    console.log(`  Layer 1 (Medications):    ${medsImported} medications with RxNorm codes`);
+    if (changesImported > 0) {
+      console.log(`  Layer 1 (Med Changes):    ${changesImported} medication change events`);
+    }
+    if (adherenceImported > 0) {
+      console.log(`  Layer 1 (Adherence):      ${adherenceImported} adherence observations`);
+    }
   }
 
   console.log(`  Time: ${elapsed}s`);
   console.log('═══════════════════════════════════════════════════\n');
+
+  // ── Coverage Report (v3.0.0) ──────────────────────────────────────────
+  if (!opts.layer3Only) {
+    const coverageStore = getClinicalStore();
+    const patientId = 'patient-tomasz-szychlinski';
+    try {
+      const labs = await coverageStore.queryLabs({ patientId });
+      const consults = await coverageStore.queryConsultations({ patientId });
+      const imaging = await coverageStore.getImagingReports(patientId);
+
+      const labsWithLoinc = labs.filter((l) => l.loincCode).length;
+      const labsWithSnomed = labs.filter((l) => l.valueSnomedCode).length;
+      const consultsWithSpecSnomed = consults.filter((c) => c.snomedSpecialtyCode).length;
+      const consultsWithFinding = consults.filter((c) => c.snomedFindingCode).length;
+      const consultsWithIcd10 = consults.filter((c) => (c as Record<string, unknown>)['icd10Code']).length;
+      const imagingWithLoinc = imaging.filter((i) => i.loincStudyCode).length;
+      const imagingWithBodySite = imaging.filter((i) => i.bodySiteSnomedCode).length;
+
+      const pct = (n: number, d: number): string =>
+        d > 0 ? `${n}/${d} (${((n / d) * 100).toFixed(1)}%)` : '0/0';
+
+      console.log('═══════════════════════════════════════════════════');
+      console.log('  Terminology Coverage Report');
+      console.log('═══════════════════════════════════════════════════');
+      console.log(`  LOINC (labs):          ${pct(labsWithLoinc, labs.length)}`);
+      console.log(`  SNOMED value (labs):   ${pct(labsWithSnomed, labs.length)}`);
+      console.log(`  SNOMED specialty:      ${pct(consultsWithSpecSnomed, consults.length)}`);
+      console.log(`  SNOMED finding:        ${pct(consultsWithFinding, consults.length)}`);
+      console.log(`  ICD-10 (consult):      ${pct(consultsWithIcd10, consults.length)}`);
+      console.log(`  Imaging LOINC:         ${pct(imagingWithLoinc, imaging.length)}`);
+      console.log(`  Body site SNOMED:      ${pct(imagingWithBodySite, imaging.length)}`);
+      console.log('═══════════════════════════════════════════════════\n');
+    } catch {
+      console.log('  (Coverage report skipped — query error)\n');
+    }
+  }
 
   const hasErrors = (layer3Result?.errors ?? 0) > 0 || (validation.errors.length > 0 && !opts.continueOnError);
   process.exit(hasErrors ? 1 : 0);

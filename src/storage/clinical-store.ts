@@ -633,6 +633,28 @@ export class ClinicalStore {
         /* column already exists */
       });
 
+    // Migration: add ICD-10 code to consultations (v3.0.0 — SNOMED crosswalk)
+    await this.client
+      .execute(`ALTER TABLE clinical_consultations ADD COLUMN icd10_code TEXT`)
+      .catch(() => {
+        /* column already exists */
+      });
+
+    // Migration: add extraction_confidence to all L1 tables (v3.0.0 — SOTA confidence scoring)
+    for (const table of [
+      'clinical_lab_results',
+      'clinical_consultations',
+      'clinical_imaging_reports',
+      'clinical_abdominal_reports',
+      'clinical_patient_reports',
+    ]) {
+      await this.client
+        .execute(`ALTER TABLE ${table} ADD COLUMN extraction_confidence REAL`)
+        .catch(() => {
+          /* column already exists */
+        });
+    }
+
     // Migration: add clinical_medications table (RxNorm-coded)
     await this.client.execute(`
       CREATE TABLE IF NOT EXISTS clinical_medications (
@@ -1021,8 +1043,8 @@ export class ClinicalStore {
                 (id, patient_id, test_name, value, unit, reference_range, flag, date, source, notes,
                  evidence_tier, validation_status, source_credibility,
                  source_document_id, fhir_resource_type, fhir_status, document_category,
-                 loinc_code, value_snomed_code)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 loinc_code, value_snomed_code, extraction_confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         lab.id,
         lab.patientId,
@@ -1043,6 +1065,7 @@ export class ClinicalStore {
         lab.documentCategory ?? null,
         lab.loincCode ?? null,
         lab.valueSnomedCode ?? null,
+        lab.extractionConfidence ?? null,
       ],
     };
   }
@@ -1063,6 +1086,33 @@ export class ClinicalStore {
     await this.client.execute({
       sql: `UPDATE clinical_consultations SET snomed_finding_code = ? WHERE id = ?`,
       args: [snomedCode, consultationId],
+    });
+  }
+
+  async updateConsultationIcd10Code(
+    consultationId: string,
+    icd10Code: string,
+  ): Promise<void> {
+    await this.ensureInitialized();
+    await this.client.execute({
+      sql: `UPDATE clinical_consultations SET icd10_code = ? WHERE id = ?`,
+      args: [icd10Code, consultationId],
+    });
+  }
+
+  async updateLabLoincCode(labId: string, loincCode: string): Promise<void> {
+    await this.ensureInitialized();
+    await this.client.execute({
+      sql: `UPDATE clinical_lab_results SET loinc_code = ? WHERE id = ?`,
+      args: [loincCode, labId],
+    });
+  }
+
+  async updateImagingLoincCode(imagingId: string, loincCode: string): Promise<void> {
+    await this.ensureInitialized();
+    await this.client.execute({
+      sql: `UPDATE clinical_imaging_reports SET loinc_study_code = ? WHERE id = ?`,
+      args: [loincCode, imagingId],
     });
   }
 
@@ -1319,8 +1369,8 @@ export class ClinicalStore {
                  conclusions, conclusions_status, recommendations,
                  evidence_tier, validation_status, source_credibility, source,
                  source_document_id, fhir_resource_type, fhir_status, document_category,
-                 snomed_specialty_code, snomed_finding_code)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 snomed_specialty_code, snomed_finding_code, icd10_code, extraction_confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         consultation.id,
         consultation.patientId,
@@ -1343,6 +1393,8 @@ export class ClinicalStore {
         consultation.documentCategory ?? null,
         consultation.snomedSpecialtyCode ?? null,
         consultation.snomedFindingCode ?? null,
+        consultation.icd10Code ?? null,
+        consultation.extractionConfidence ?? null,
       ],
     });
   }
@@ -1390,6 +1442,7 @@ export class ClinicalStore {
       snomedFindingCode: row['snomed_finding_code']
         ? String(row['snomed_finding_code'])
         : undefined,
+      icd10Code: row['icd10_code'] ? String(row['icd10_code']) : undefined,
       ...mapProvenance(row as Record<string, unknown>),
       ...mapFhirMetadata(row as Record<string, unknown>),
     }));
@@ -1955,8 +2008,8 @@ export class ClinicalStore {
       sql: `INSERT OR REPLACE INTO clinical_patient_reports
                 (id, patient_id, date, type, content, severity, extracted_insights,
                  evidence_tier, validation_status, source_credibility, source,
-                 source_document_id, fhir_resource_type, fhir_status, document_category)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 source_document_id, fhir_resource_type, fhir_status, document_category, extraction_confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         report.id,
         report.patientId,
@@ -1973,6 +2026,7 @@ export class ClinicalStore {
         report.fhirResourceType ?? null,
         report.fhirStatus ?? null,
         report.documentCategory ?? null,
+        report.extractionConfidence ?? null,
       ],
     });
   }
@@ -2123,8 +2177,8 @@ export class ClinicalStore {
                  technique, findings, impression, comparison, source,
                  evidence_tier, validation_status, source_credibility,
                  source_document_id, fhir_resource_type, fhir_status, document_category,
-                 diagnostic_service_section, loinc_study_code, body_site_snomed_code)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 diagnostic_service_section, loinc_study_code, body_site_snomed_code, extraction_confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         report.id,
         report.patientId,
@@ -2148,6 +2202,7 @@ export class ClinicalStore {
         report.diagnosticServiceSection ?? null,
         report.loincStudyCode ?? null,
         report.bodySiteSnomedCode ?? null,
+        report.extractionConfidence ?? null,
       ],
     });
   }
@@ -2184,8 +2239,8 @@ export class ClinicalStore {
                  findings, conclusions, source,
                  evidence_tier, validation_status, source_credibility,
                  source_document_id, fhir_resource_type, fhir_status, document_category,
-                 loinc_procedure_code)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 loinc_procedure_code, extraction_confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         report.id,
         report.patientId,
@@ -2204,6 +2259,7 @@ export class ClinicalStore {
         report.fhirStatus ?? null,
         report.documentCategory ?? null,
         report.loincProcedureCode ?? null,
+        report.extractionConfidence ?? null,
       ],
     });
   }
@@ -3983,12 +4039,14 @@ function mapFhirMetadata(row: Record<string, unknown>): {
   fhirResourceType?: string;
   fhirStatus?: LabResult['fhirStatus'];
   documentCategory?: LabResult['documentCategory'];
+  extractionConfidence?: number;
 } {
   const result: Record<string, unknown> = {};
   if (row['source_document_id']) result['sourceDocumentId'] = String(row['source_document_id']);
   if (row['fhir_resource_type']) result['fhirResourceType'] = String(row['fhir_resource_type']);
   if (row['fhir_status']) result['fhirStatus'] = String(row['fhir_status']);
   if (row['document_category']) result['documentCategory'] = String(row['document_category']);
+  if (row['extraction_confidence'] != null) result['extractionConfidence'] = Number(row['extraction_confidence']);
   return result as ReturnType<typeof mapFhirMetadata>;
 }
 
@@ -4008,6 +4066,7 @@ function mapRowToImagingReport(row: Record<string, unknown>): ImagingReport {
     source: optStr(row['source']),
     diagnosticServiceSection: optStr(row['diagnostic_service_section']),
     loincStudyCode: optStr(row['loinc_study_code']),
+    bodySiteSnomedCode: optStr(row['body_site_snomed_code']),
     ...mapProvenance(row),
     ...mapFhirMetadata(row),
   } as ImagingReport;
