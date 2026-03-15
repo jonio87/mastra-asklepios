@@ -411,10 +411,10 @@ function mapLabValue(
   if (value.loinc) noteParts.push(`LOINC: ${value.loinc}`);
   const notes = noteParts.length > 0 ? noteParts.join('; ') : undefined;
 
-  const source = fm.source_lab ?? fm.facility ?? fm.institution;
+  const source = fm.source_lab ?? fm.facility ?? fm.institution ?? fm.source_file ?? 'patient-compiled';
 
   // Normalize test name and unit to international English standard
-  const normalized = normalizeLabValue(value.test_name, value.unit);
+  const normalized = normalizeLabValue(value.test_name, value.unit ?? '');
 
   const lab: LabResult = {
     id,
