@@ -9,15 +9,17 @@
  *   Raw File → LLM Triage → Vision Extraction → L0 Source Document → L1 Structured Records
  */
 
+import { createHash } from 'node:crypto';
 import { copyFile, mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
-
 import type { LabResult, PatientReport } from '../schemas/clinical-record.js';
 import type { SourceDocument } from '../schemas/source-document.js';
 import { getClinicalStore } from '../storage/clinical-store.js';
 import { getProvenanceStore } from '../storage/provenance-store.js';
+import { translateCode } from '../terminology/crosswalk-service.js';
+import { initTerminologyProviders } from '../terminology/init.js';
+import { SYSTEM_ICD10, SYSTEM_SNOMED } from '../terminology/terminology-service.js';
 import { logger } from '../utils/logger.js';
-
 import { mapConsultation } from './consultation-parser.js';
 import { applyOverrides, type TriageResult, triageDocument } from './document-triage.js';
 import { extractClinicalFindings } from './findings-extractor.js';
@@ -28,6 +30,7 @@ import {
   type FileInfo,
 } from './frontmatter-builder.js';
 import { mapImagingReport } from './imaging-parser.js';
+import { validateLabResult } from './lab-value-validator.js';
 import { initAxisSearch } from './loinc-axis-search.js';
 import { initLoincEmbeddingSearch } from './loinc-embedding-search.js';
 import { initLoincLookup } from './loinc-lookup.js';
@@ -45,11 +48,16 @@ import { getRxnormCode } from './rxnorm-normalizer.js';
 import type { RecordFrontmatter, StructuredLabValue } from './schemas.js';
 import { getSnomedSpecialtyCode, normalizeSpecialty } from './specialty-normalizer.js';
 import {
+  validateConsultationRecord,
+  validateImagingRecord,
+  validateLabRecord,
+  validateProcedureRecord,
+} from './validation-layer.js';
+import {
   type ExtractionResult,
   extractDocument,
   PasswordProtectedPdfError,
 } from './vision-extractor.js';
-import { createHash } from 'node:crypto';
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -143,7 +151,8 @@ export async function ingestDocument(opts: IngestOptions): Promise<IngestResult>
   const startTime = Date.now();
   const warnings: string[] = [];
 
-  // 0. Ensure LOINC reference data is loaded (no-op after first call)
+  // 0. Ensure reference data + terminology service loaded (no-op after first call)
+  initTerminologyProviders();
   await Promise.all([initLoincLookup(), initLoincEmbeddingSearch(), initAxisSearch()]);
 
   // 1. File prep
@@ -574,7 +583,142 @@ async function importL1(
     );
   }
 
+  // L1 Provenance: record wasDerivedFrom L0 source doc (US-003)
+  const totalL1Records =
+    summary.labValues +
+    summary.consultations +
+    summary.imagingReports +
+    summary.procedures +
+    summary.narratives;
+
+  if (totalL1Records > 0) {
+    try {
+      await recordL1Provenance(sourceDoc, triage, summary, opts.patientId);
+    } catch {
+      // Provenance recording is non-fatal
+    }
+  }
+
   return summary;
+}
+
+// ─── L1 Provenance (wasDerivedFrom L0) ─────────────────────────────────
+
+import type { ProvEntity } from '../schemas/provenance.js';
+
+const L1_CATEGORY_ENTITY_TYPE: Record<string, ProvEntity['type']> = {
+  lab_result: 'lab-result',
+  consultation: 'consultation',
+  imaging_report: 'imaging-report',
+  procedure: 'procedure-report',
+  narrative: 'source-doc',
+  external: 'consultation',
+};
+
+/** Record L1 entities and their derivation from L0 source document. */
+async function recordL1Provenance(
+  sourceDoc: SourceDocument,
+  triage: TriageResult,
+  summary: L1ImportSummary,
+  patientId: string,
+): Promise<void> {
+  const provStore = getProvenanceStore();
+  const now = new Date().toISOString();
+  const activityId = `l1-import-${sourceDoc.id}-${Date.now()}`;
+
+  const totalRecords =
+    summary.labValues +
+    summary.consultations +
+    summary.imagingReports +
+    summary.procedures +
+    summary.narratives;
+
+  // Record the L1 import activity with terminology version metadata (US-004)
+  await provStore.recordActivity({
+    id: activityId,
+    type: 'import',
+    startedAt: now,
+    endedAt: now,
+    metadata: JSON.stringify({
+      phase: 'l1-import',
+      sourceDocumentId: sourceDoc.id,
+      category: triage.category,
+      recordsCreated: totalRecords,
+      terminologyVersions: {
+        loinc: '2.82',
+        snomed: '2025-01',
+        icd10: '2026-03',
+        rxnorm: '2026-03',
+        pipeline: '3.0.0',
+      },
+    }),
+    createdAt: now,
+  });
+
+  // Record L1 entity for the category
+  const entityType = L1_CATEGORY_ENTITY_TYPE[triage.category] ?? ('source-doc' as const);
+  const entityId = `l1-${entityType}-${sourceDoc.id}`;
+
+  await provStore.recordEntity({
+    id: entityId,
+    type: entityType,
+    layer: 1,
+    patientId,
+    metadata: JSON.stringify({
+      sourceDocumentId: sourceDoc.id,
+      category: triage.category,
+      recordCount: totalRecords,
+    }),
+    createdAt: now,
+  });
+
+  // wasDerivedFrom: L1 entity → L0 source doc
+  await provStore.recordRelation({
+    id: `rel-${entityId}-derived-${sourceDoc.id}`,
+    type: 'wasDerivedFrom',
+    subjectId: entityId,
+    objectId: sourceDoc.id,
+    createdAt: now,
+  });
+
+  // wasGeneratedBy: L1 entity → import activity
+  await provStore.recordRelation({
+    id: `rel-${entityId}-gen-${activityId}`,
+    type: 'wasGeneratedBy',
+    subjectId: entityId,
+    objectId: activityId,
+    createdAt: now,
+  });
+}
+
+// ─── Dynamic fhirStatus (US-004) ───────────────────────────────────────
+
+/**
+ * Derive FHIR status from extraction confidence and validation overrides.
+ *
+ * Thresholds:
+ *   >= 0.90 → 'final'
+ *   >= 0.70 → 'preliminary' (with warning)
+ *   <  0.70 → 'preliminary' (with escalation flag)
+ *
+ * Override: frontmatter validation_status 'confirmed' forces 'final'.
+ */
+function deriveFhirStatus(
+  confidence: number,
+  validationStatus?: string,
+): { fhirStatus: 'final' | 'preliminary'; escalate: boolean } {
+  // Override: confirmed → always final
+  if (validationStatus === 'confirmed') {
+    return { fhirStatus: 'final', escalate: false };
+  }
+
+  if (confidence >= 0.9) {
+    return { fhirStatus: 'final', escalate: false };
+  }
+  if (confidence >= 0.7) {
+    return { fhirStatus: 'preliminary', escalate: false };
+  }
+  return { fhirStatus: 'preliminary', escalate: true };
 }
 
 // ─── L1 handlers (reuse existing parsers) ───────────────────────────────
@@ -587,15 +731,48 @@ async function importLabResults(
 ): Promise<number> {
   if (!parsed.structuredValues?.length) return 0;
 
-  const labs: LabResult[] = await Promise.all(
+  const rawLabs: LabResult[] = await Promise.all(
     parsed.structuredValues.map((sv, idx) =>
       mapLabValue(sv, parsed.frontmatter, idx, hashSlug, sourceDocId),
     ),
   );
 
-  if (labs.length > 0) {
-    const result = await store.addLabResultsBatch(labs);
-    return result.inserted;
+  // Post-processing validation: catch LLM extraction artifacts
+  const validatedLabs: LabResult[] = [];
+  for (const lab of rawLabs) {
+    const result = validateLabResult(lab, parsed.structuredValues);
+    if (result.rejected) {
+      logger.warn(
+        `Lab rejected: ${result.rejectReason} (test: ${lab.testName}, value: ${String(lab.value)})`,
+      );
+      continue;
+    }
+    // Apply corrections
+    if (result.corrections.testName) lab.testName = result.corrections.testName;
+    if (result.corrections.loincCode) lab.loincCode = result.corrections.loincCode;
+    if (result.corrections.flag) lab.flag = result.corrections.flag;
+    if (result.corrections.validationStatus)
+      lab.validationStatus = result.corrections.validationStatus;
+    // Append notes
+    if (result.additionalNotes.length > 0) {
+      const extra = result.additionalNotes.join('; ');
+      lab.notes = lab.notes ? `${lab.notes}; ${extra}` : extra;
+    }
+    // Terminology validation + confidence scoring (US-002)
+    const sourceConfidence = parsed.frontmatter.extraction_confidence ?? 0.9;
+    const validation = validateLabRecord(lab, sourceConfidence);
+    lab.extractionConfidence = validation.confidence;
+    lab.fhirStatus = validation.fhirStatus;
+    for (const w of validation.warnings) {
+      logger.warn(`Lab validation: ${w}`);
+    }
+
+    validatedLabs.push(lab);
+  }
+
+  if (validatedLabs.length > 0) {
+    const storeResult = await store.addLabResultsBatch(validatedLabs);
+    return storeResult.inserted;
   }
   return 0;
 }
@@ -639,7 +816,7 @@ async function mapLabValue(
   if (fm.source_credibility !== undefined) lab.sourceCredibility = fm.source_credibility;
 
   lab.fhirResourceType = 'Observation';
-  lab.fhirStatus = 'final';
+  lab.fhirStatus = 'final'; // default; overridden by validation layer
   lab.documentCategory = 'diagnostic-report';
   lab.sourceDocumentId = sourceDocId ?? `src-${fm.document_id}`;
 
@@ -684,6 +861,12 @@ async function importConsultation(
 
   const consultation = mapConsultation(fm, body, hashSlug, sourceDocId);
 
+  // Dynamic fhirStatus + extraction confidence (US-004)
+  const consultConfidence = fm.extraction_confidence ?? 0.9;
+  consultation.extractionConfidence = consultConfidence;
+  const consultStatus = deriveFhirStatus(consultConfidence, fm.validation_status);
+  consultation.fhirStatus = consultStatus.fhirStatus;
+
   // LLM fallback for SNOMED finding extraction
   if (!consultation.snomedFindingCode && body.trim().length > 50) {
     try {
@@ -701,6 +884,37 @@ async function importConsultation(
     } catch {
       // Non-fatal
     }
+  }
+
+  // ICD-10 crosswalk: SNOMED finding → ICD-10 via crosswalk service
+  if (consultation.snomedFindingCode) {
+    try {
+      const crosswalkResults = translateCode(
+        SYSTEM_SNOMED,
+        consultation.snomedFindingCode,
+        SYSTEM_ICD10,
+      );
+      const bestMatch =
+        crosswalkResults.find((r) => r.relationship === 'equivalent') ?? crosswalkResults[0];
+      if (bestMatch) {
+        consultation.icd10Code = bestMatch.targetCode;
+        if (verbose) {
+          logger.info(
+            `  ICD-10 crosswalk: SNOMED ${consultation.snomedFindingCode} → ICD-10 ${bestMatch.targetCode}`,
+          );
+        }
+      }
+    } catch {
+      // Crosswalk failure is non-fatal
+    }
+  }
+
+  // Terminology validation + confidence scoring (US-002)
+  const consultValidation = validateConsultationRecord(consultation, consultConfidence);
+  consultation.extractionConfidence = consultValidation.confidence;
+  consultation.fhirStatus = consultValidation.fhirStatus;
+  for (const w of consultValidation.warnings) {
+    logger.warn(`Consultation validation: ${w}`);
   }
 
   await store.addConsultation(consultation);
@@ -725,6 +939,16 @@ async function importImagingReport(
   const report = mapImagingReport(fm, body);
   // Override with hash-based deterministic sourceDocumentId (not LLM-generated fm.document_id)
   if (sourceDocId) report.sourceDocumentId = sourceDocId;
+
+  // Terminology validation + confidence scoring (US-002)
+  const imgConfidence = fm.extraction_confidence ?? 0.9;
+  const imgValidation = validateImagingRecord(report, imgConfidence);
+  report.extractionConfidence = imgValidation.confidence;
+  report.fhirStatus = imgValidation.fhirStatus;
+  for (const w of imgValidation.warnings) {
+    logger.warn(`Imaging validation: ${w}`);
+  }
+
   await store.addImagingReport(report);
   return 1;
 }
@@ -748,6 +972,16 @@ async function importProcedure(
 
   // Override with hash-based deterministic sourceDocumentId (not LLM-generated fm.document_id)
   if (sourceDocId) report.sourceDocumentId = sourceDocId;
+
+  // Terminology validation + confidence scoring (US-002)
+  const procConfidence = fm.extraction_confidence ?? 0.9;
+  const procValidation = validateProcedureRecord(report, procConfidence);
+  report.extractionConfidence = procValidation.confidence;
+  report.fhirStatus = procValidation.fhirStatus;
+  for (const w of procValidation.warnings) {
+    logger.warn(`Procedure validation: ${w}`);
+  }
+
   await store.addAbdominalReport(report);
   return 1;
 }

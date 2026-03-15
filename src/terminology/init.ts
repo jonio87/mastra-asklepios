@@ -78,7 +78,7 @@ export function initTerminologyProviders(): void {
     return { valid: true };
   });
 
-  // SNOMED: validate code is in our findings map (value side)
+  // SNOMED: validate code format + check curated map (warn-only for map miss)
   svc.registerValidator(SYSTEM_SNOMED, (code: string) => {
     const snomedFormat = /^\d{6,18}$/;
     if (!snomedFormat.test(code)) {
@@ -89,7 +89,8 @@ export function initTerminologyProviders(): void {
     if (values.has(code)) {
       return { valid: true, active: true };
     }
-    return { valid: false, warnings: [`SNOMED code ${code} not in curated findings map`] };
+    // Valid format but not in curated map — warn, don't reject (matches ICD-10 pattern)
+    return { valid: true, warnings: [`SNOMED code ${code} has valid format but not in curated findings map`] };
   });
 
   // ICD-10: validate format + existence in map
